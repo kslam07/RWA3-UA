@@ -20,7 +20,7 @@ visualize_wake      = False
 plot_backmesh       = False
 plot_camber         = False
 plot_cl_curve       = False
-plot_velocity_field = False
+plot_velocity_field = True
 plot_pressure_field = False
 plot_deltaP         = False
 
@@ -135,7 +135,7 @@ def aijmatrix(xi, yi, xj, yj, Npan, ni):  # Calculation of the influence coeffic
     return aijmatrix
 
 
-def calculation(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho, key):
+def steady_VP(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho, key):
 
     print('   ...Creating geometry.')
 
@@ -212,6 +212,84 @@ def calculation(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho, key):
 
     return xc4, yc4, dcpj, Cl, gammamatrix, xp, yp
 
+
+def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap, U_0, rho):
+
+    print('   ...Start time loop.')
+
+    for t in range(len(trange)):
+
+        print(f"   Time step: {t}/{len(trange)}")
+        print('   ...Creating geometry.')
+
+        # Add a flap (OPTIONAL)
+        if enable_flap:
+
+            x = x * (1 - c_flap)
+
+            Nf_points = Npan_flap + 1
+            x_flap = np.arange(1, Nf_points + 1)
+            x_flap = c_flap * c/2 * (1 - np.cos((x_flap - 1) * np.pi/(Nf_points - 1)))
+            y_flap = np.copy(x_flap) * 0.
+
+            xp_flap = x_flap * np.cos(a_flap) + y_flap * np.sin(a_flap)
+            yp_flap = -x_flap * np.sin(a_flap) + y_flap * np.cos(a_flap)
+
+            x = np.concatenate((x, xp_flap[1:]+ (1 - c_flap)))
+            y = np.concatenate((y, yp_flap[1:]))
+
+            Npan = Npan + Npan_flap
+
+        # center LE at the origin
+        x = x - c/4
+
+        # Rotate airfoil clockwise
+        xp = x * np.cos(alpha_arr[t]) + y * np.sin(alpha_arr[t])
+        yp = -x * np.sin(alpha_arr[t]) + y * np.cos(alpha_arr[t])
+
+        # Calculate dx,dy,dc component per panel (dc = panel length)
+        dx = np.delete(np.roll(xp, -1) - xp, -1)
+        dy = np.delete(np.roll(yp, -1) - yp, -1)
+        dc = np.sqrt(dx**2 + dy**2)
+
+        # Further induced geometry calculations
+        alpha_i = np.arctan2(dy, dx)                            # Induced AoA by panel slope
+        ni = np.matrix([np.sin(-alpha_i), np.cos(-alpha_i)])    # Normal vector; First index = x, second index = y
+
+        # Calculate x,y coordinates of the quarter cord (c4) and collocation points (cp)
+        xc4 = xp[0:-1] + dx/4
+        yc4 = yp[0:-1] + dy/4
+
+        xcp = xp[0:-1] + dx * (3/4)
+        ycp = yp[0:-1] + dy * (3/4)
+
+        print('   ...Solving linear system for circulation strengths.')
+
+        # Solve system #
+        aij_mat = aijmatrix(xcp, ycp, xc4, yc4, Npan, ni)   # aij matrix
+        RHS = U_0 * np.sin(alpha_i) * np.ones(Npan)  # RHS vector
+        # if enable_flap:
+        #
+        #     RHS = U_0 * np.sin(alpha_i + a_flap) * np.ones(Npan)         # RHS vector
+        #
+        # else:
+        #
+        #     RHS = U_0 * np.sin(alpha_i) * np.ones(Npan)         # RHS vector
+
+        gammamatrix = np.linalg.solve(aij_mat, RHS)         # Find circulation of each vortex point
+
+        print('   ...Calculating lift and pressure.\n')
+
+        # Secondary computations
+        dLj = rho * U_0 * gammamatrix           # Lift difference
+        L = np.sum(dLj)                         # Total Lift
+        Cl = L / (0.5 * rho * U_0 ** 2 * c)     # Lift coefficient
+
+        dpj = rho * U_0 * gammamatrix / dc      # Pressure difference
+        dcpj = dpj/(0.5 * rho * (U_0**2))       # Pressure coefficient difference between upper and lower surface
+
+    return xc4, yc4, dcpj, Cl, gammamatrix, xp, yp
+
 # ---------------------------------- #
 # Solver
 # ---------------------------------- #
@@ -239,13 +317,22 @@ if plot_cl_curve:
 
     for i, alpha in enumerate(alpha_range):
 
-        temp = calculation(y, x, Npan, Npan_flap, np.deg2rad(alpha), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+        print(f"   Alpha: {alpha} deg")
+        temp = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(alpha), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
         cl_arr[i] = temp[3]
 
 if plot_velocity_field or plot_pressure_field:
 
     print('...Running solver.\n')
-    result = calculation(y, x, Npan, Npan_flap, np.deg2rad(15), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+
+    if enable_pitching:
+
+        result = unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, np.deg2rad(a_flap), c, c_flap, U_0, rho)
+
+    else:
+
+        result = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(15), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+
     xx = result[0]
     yy = result[1]
     gammaM = result[4]
@@ -286,7 +373,7 @@ plt.close('all')
 
 if plot_backmesh:
 
-    temp = calculation(y, x, Npan, Npan_flap, np.deg2rad(8), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=1)
+    temp = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(8), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=1)
     xp = temp[0]
     yp = temp[1]
     plt.figure("Background Mesh")
@@ -362,8 +449,8 @@ if plot_camber:
     yflat = np.copy(x) * 0.         # Flat plate
 
     # Results needed for plotting
-    result_flat = calculation(yflat, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
-    result_c4 = calculation(ycb4, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+    result_flat = steady_VP(yflat, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+    result_c4 = steady_VP(ycb4, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
 
     plt.figure("Camber Lines")
     plt.title('Camber lines')
@@ -383,8 +470,8 @@ if plot_deltaP:
     yflat = np.copy(x) * 0.         # Flat plate
 
     # Results needed for plotting
-    result_flat = calculation(yflat, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
-    result_c4 = calculation(ycb4, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+    result_flat = steady_VP(yflat, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+    result_c4 = steady_VP(ycb4, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
 
     plt.figure("Pressure Difference")
     plt.title("Pressure Difference")
