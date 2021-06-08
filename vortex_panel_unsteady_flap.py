@@ -1,5 +1,5 @@
 
-## VORTEX PANEL METHOD
+# THIN AIRFOIL VORTEX PANEL METHOD #
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,53 +9,91 @@ from matplotlib.cm import ScalarMappable
 # Flags
 # ---------------------------------- #
 
-enable_flap         = True
+print('Start.\n')
+print('...Setting flags based on user input.')
+
+enable_flap         = False
+enable_pitching     = True
+add_meshrefinement  = True
+visualize_wake      = False
 
 plot_backmesh       = False
 plot_camber         = False
-plot_cl_curve       = True
-plot_velocity_field = True
-plot_pressure_field = True
+plot_cl_curve       = False
+plot_velocity_field = False
+plot_pressure_field = False
 plot_deltaP         = False
 
 # ---------------------------------- #
 # Geometry and operations parameters
 # ---------------------------------- #
 
+print('...Read global parameters.')
+
 # Airfoil
-Npan = 100             # Number of panels
-res = 50               # Grid discretization in 1 direction
-c = 1                  # (m) chord length
+Npan = 40               # Number of panels
+c = 1                   # (m) chord length
 
 # Flap
-c_flap = 0.3           # Fraction of chord length
-a_flap = 15            # (deg) Flap deflection in degrees
-Npan_flap = 10         # Number of panels on flap
+c_flap = 0.3            # Fraction of chord length
+a_flap = 15             # (deg) Flap deflection in degrees
+Npan_flap = 10          # Number of panels on flap
+
+# Mesh
+xres = 50               # Grid discretization in x direction
+yres = 50               # Grid discretization in y direction
 
 # Operations
-rho = 1.225                     # (kg/m^3) free-stream density
-U_0 = 10                        # (m/s) free-stream velocity
-arange = np.arange(-4, 15)      # Range of AoA
-cl_arr = np.zeros(len(arange))  # Lift coefficient log
+rho = 1.225             # (kg/m^3) free-stream density
+U_0 = 10                # (m/s) free-stream velocity
+k = 0.1                 # (Hz) Reduced frequency: 0.02, 0.05, 0.1
+omega = k*2*U_0/c       # (Hz) Frequency of the unsteadiness
+amp = 15                # (deg) Amplitude of the pitching motion
+
+# Time
+start = 0                                   # Start time
+stop = np.pi/(8*omega)                      # Stop time
+dt = 0.002                                  # Time step
+trange = np.arange(start, stop + dt, dt)    # Time log
 
 # ---------------------------------- #
 # Create Grid
 # ---------------------------------- #
 
 print('...Creating background grid and refinement.')
-# Add refinement in the vicinity of the flat plate
-xrange = np.linspace(-1.0 * c, 2.0 * c, res)*(1 - 0.2 * np.sin(np.linspace(0, np.pi, res)))
-yrange = np.linspace(-1.5 * c, 1.5 * c, res)*(1 - 0.9 * np.sin(np.linspace(0, np.pi, res)))
+
+if visualize_wake:
+
+    wl = 25         # wake length
+
+else:
+
+    wl = 2          # wake length
+
+if add_meshrefinement:
+
+    # Add refinement in the vicinity of the flat plate
+    xrange = np.linspace(-1.0 * c, wl * c, xres)*(1 - 0.2 * np.sin(np.linspace(0, np.pi, xres)))
+    yrange = np.linspace(-1.5 * c, 1.5 * c, yres)*(1 - 0.9 * np.sin(np.linspace(0, np.pi, yres)))
+
+else:
+
+    xrange = np.linspace(-1.0 * c, wl * c, xres)
+    yrange = np.linspace(-1.5 * c, 1.5 * c, yres)
+
+# Create grid
 [X, Y] = np.meshgrid(xrange, yrange)
 
 # ---------------------------------- #
 # Vortex Panel Functions
 # ---------------------------------- #
 
+
 def naca4(c, m, p, x):  # Calculate corresponding Y components of camber line for naca 4series
 
-    print('...Building NACA 4series camber line.')
     # c = hord length,m = max camber, p = max camber postion, x are x coordinates
+
+    print('...Building NACA 4series camber line.')
 
     x1 = x[np.where(x <= p)]    # X components upto largest thickness point
     x2 = x[np.where(x > p)]     # X components after largest thickness point
@@ -80,9 +118,11 @@ def indvel(gammaj, x, y, xj, yj):  # Formula 11.1
 def aijmatrix(xi, yi, xj, yj, Npan, ni):  # Calculation of the influence coefficients
 
     print('   ...Computing influence matrix.')
+
     aijmatrix = np.matrix(np.zeros((Npan, Npan)))
 
     print('   ...Computing induced velocities.')
+
     for i in range(0, Npan):
 
         for j in range(0, Npan):
@@ -95,7 +135,7 @@ def aijmatrix(xi, yi, xj, yj, Npan, ni):  # Calculation of the influence coeffic
     return aijmatrix
 
 
-def calculation(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho):
+def calculation(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho, key):
 
     print('   ...Creating geometry.')
 
@@ -124,6 +164,11 @@ def calculation(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho):
     xp = x * np.cos(alpha) + y * np.sin(alpha)
     yp = -x * np.sin(alpha) + y * np.cos(alpha)
 
+    if key == 1:
+
+        key = 0
+        return xp, yp
+
     # Calculate dx,dy,dc component per panel (dc = panel length)
     dx = np.delete(np.roll(xp, -1) - xp, -1)
     dy = np.delete(np.roll(yp, -1) - yp, -1)
@@ -141,12 +186,22 @@ def calculation(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho):
     ycp = yp[0:-1] + dy * (3/4)
 
     print('   ...Solving linear system for circulation strengths.')
+
     # Solve system #
     aij_mat = aijmatrix(xcp, ycp, xc4, yc4, Npan, ni)   # aij matrix
-    RHS = U_0 * np.sin(alpha_i) * np.ones(Npan)         # RHS vector
+    RHS = U_0 * np.sin(alpha_i) * np.ones(Npan)  # RHS vector
+    # if enable_flap:
+    #
+    #     RHS = U_0 * np.sin(alpha_i + a_flap) * np.ones(Npan)         # RHS vector
+    #
+    # else:
+    #
+    #     RHS = U_0 * np.sin(alpha_i) * np.ones(Npan)         # RHS vector
+
     gammamatrix = np.linalg.solve(aij_mat, RHS)         # Find circulation of each vortex point
 
     print('   ...Calculating lift and pressure.\n')
+
     # Secondary computations
     dLj = rho * U_0 * gammamatrix           # Lift difference
     L = np.sum(dLj)                         # Total Lift
@@ -169,19 +224,28 @@ x = c/2 * (1 - np.cos((x - 1) * np.pi/(Npoints - 1)))
 # Flat plate
 y = np.copy(x) * 0.
 
+if enable_pitching:
+
+    alpha_arr = amp * np.sin(omega * trange)            # AoA log
+    dalpha_arr = amp * omega * np.cos(omega * trange)   # Derivative of AoA log
+
 if plot_cl_curve:
 
     print('...Building lift curve.')
     print('...Running solver.\n')
-    for i, alpha in enumerate(arange):
 
-        temp = calculation(y, x, Npan, Npan_flap, np.deg2rad(alpha), np.deg2rad(a_flap), c, c_flap, U_0, rho)
+    alpha_range = np.arange(-4, 15)         # Range of AoA
+    cl_arr = np.zeros(len(alpha_range))     # Lift coefficient log
+
+    for i, alpha in enumerate(alpha_range):
+
+        temp = calculation(y, x, Npan, Npan_flap, np.deg2rad(alpha), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
         cl_arr[i] = temp[3]
 
 if plot_velocity_field or plot_pressure_field:
 
     print('...Running solver.\n')
-    result = calculation(y, x, Npan, Npan_flap, np.deg2rad(15), np.deg2rad(a_flap), c, c_flap, U_0, rho)
+    result = calculation(y, x, Npan, Npan_flap, np.deg2rad(15), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
     xx = result[0]
     yy = result[1]
     gammaM = result[4]
@@ -222,9 +286,9 @@ plt.close('all')
 
 if plot_backmesh:
 
-    temp = calculation(y, x, Npan, Npan_flap, np.deg2rad(8), np.deg2rad(a_flap), c, c_flap, U_0, rho)
-    xp = temp[5]
-    yp = temp[6]
+    temp = calculation(y, x, Npan, Npan_flap, np.deg2rad(8), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=1)
+    xp = temp[0]
+    yp = temp[1]
     plt.figure("Background Mesh")
     plt.title(r'Local Refinement')
     plt.scatter(X, Y, s=0.5)
@@ -236,8 +300,8 @@ if plot_cl_curve:
 
     plt.figure("CL")
     plt.title(r'$C_l$-$\alpha$ curve')
-    plt.plot(arange, cl_arr, label='Panel Method', lw=1.2)
-    plt.plot(arange, 2*np.pi*np.deg2rad(arange), '--', label='Analytic', lw=1.2)
+    plt.plot(alpha_range, cl_arr, label='Panel Method', lw=1.2)
+    plt.plot(alpha_range, 2*np.pi*np.deg2rad(alpha_range), '--', label='Analytic', lw=1.2)
     plt.xlabel(r'Angle of attack $\alpha$ (deg)')
     plt.ylabel(r'Lift coefficient $C_l$ (-)')
     plt.grid('True')
@@ -298,8 +362,8 @@ if plot_camber:
     yflat = np.copy(x) * 0.         # Flat plate
 
     # Results needed for plotting
-    result_flat = calculation(yflat, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho)
-    result_c4 = calculation(ycb4, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho)
+    result_flat = calculation(yflat, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+    result_c4 = calculation(ycb4, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
 
     plt.figure("Camber Lines")
     plt.title('Camber lines')
@@ -319,8 +383,8 @@ if plot_deltaP:
     yflat = np.copy(x) * 0.         # Flat plate
 
     # Results needed for plotting
-    result_flat = calculation(yflat, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho)
-    result_c4 = calculation(ycb4, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho)
+    result_flat = calculation(yflat, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+    result_c4 = calculation(ycb4, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
 
     plt.figure("Pressure Difference")
     plt.title("Pressure Difference")
@@ -333,3 +397,5 @@ if plot_deltaP:
     plt.legend()
 
 plt.show()
+print('\nDone.')
+exit(0)
