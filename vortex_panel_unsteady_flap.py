@@ -268,13 +268,6 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         # Solve system #
         aij_mat = aijmatrix(xcp, ycp, xc4, yc4, Npan, ni)   # aij matrix
         RHS = U_0 * np.sin(alpha_i) * np.ones(Npan)  # RHS vector
-        # if enable_flap:
-        #
-        #     RHS = U_0 * np.sin(alpha_i + a_flap) * np.ones(Npan)         # RHS vector
-        #
-        # else:
-        #
-        #     RHS = U_0 * np.sin(alpha_i) * np.ones(Npan)         # RHS vector
 
         gammamatrix = np.linalg.solve(aij_mat, RHS)         # Find circulation of each vortex point
 
