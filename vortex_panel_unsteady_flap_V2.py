@@ -108,8 +108,8 @@ def naca4(c, m, p, x):  # Calculate corresponding Y components of camber line fo
 def indvel(gammaj, x, y, xj, yj):  # Formula 11.1
 
     rj_sqrt = (x - xj) ** 2 + (y - yj) ** 2
-    randommatrix = np.matrix('0 1; -1 0')
-    xymatrix = np.matrix([[x - xj], [y - yj]])
+    randommatrix = np.array([[0, 1], [-1, 0]])
+    xymatrix = np.array([[x - xj], [y - yj]])
     uv = gammaj / (2 * np.pi * rj_sqrt) * np.matmul(randommatrix, xymatrix)
 
     return uv
@@ -202,7 +202,7 @@ def steady_VP(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho, key):
 
     # Further induced geometry calculations
     alpha_i = np.arctan2(dy, dx)                            # Induced AoA by panel slope
-    ni = np.matrix([np.sin(-alpha_i), np.cos(-alpha_i)])    # Normal vector; First index = x, second index = y
+    ni = np.array([np.sin(-alpha_i), np.cos(-alpha_i)])    # Normal vector; First index = x, second index = y
 
     # Calculate x,y coordinates of the quarter cord (c4) and collocation points (cp)
     xc4 = xp[0:-1] + dx/4
@@ -271,7 +271,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 
     # Further induced geometry calculations
     alpha_i = np.arctan2(dy, dx)  # Induced AoA by panel slope
-    ni = np.matrix([np.sin(-alpha_i), np.cos(-alpha_i)])  # Normal vector; First index = x, second index = y
+    ni = np.array([np.sin(-alpha_i), np.cos(-alpha_i)])  # Normal vector; First index = x, second index = y
 
     # Calculate x,y coordinates of the quarter cord (c4) and collocation points (cp)
     xc4 = x[0:-1] + dx / 4
@@ -321,7 +321,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 
         # Further induced geometry calculations
         alpha_i = np.arctan2(dy, dx)                            # Induced AoA by panel slope
-        ni = np.matrix([np.sin(-alpha_i), np.cos(-alpha_i)])    # Normal vector; First index = x, second index = y
+        ni = np.array([np.sin(-alpha_i), np.cos(-alpha_i)])    # Normal vector; First index = x, second index = y
 
         # Calculate x,y coordinates of the quarter cord (c4) and collocation points (cp)
         xc4 = xp[0:-1] + dx/4
