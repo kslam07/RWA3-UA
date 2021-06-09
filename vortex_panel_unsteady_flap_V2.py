@@ -163,7 +163,7 @@ def aijmatrix(xcols, ycols, xvorts, yvorts, Npan, ni):  # Calculation of the inf
         for j in range(0, Npan):
             vel_vor = lumpvor2d(xcols[i], ycols[i], xvorts[j], yvorts[j])
             a_ij = vel_vor @ ni[:, i]
-            aijmatrix[i, j] = a_ij
+            a_mat[i, j] = a_ij
 
     return a_mat
 
