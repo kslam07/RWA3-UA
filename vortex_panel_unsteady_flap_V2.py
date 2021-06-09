@@ -183,7 +183,7 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
     :param y_twake: y-pos of trailing edge wake
     :param ni: array containing the normal vectors
     :param wake_gamma: circulation of the wake vortex (unit strength)
-    :return:
+    :return: new influence matrix (a_mat) and RHS contribution of the wake vortices (v_norm)
     """
 
     print('   ...Computing influence matrix.')
@@ -204,6 +204,7 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
 
     return a_mat, v_norm
 
+@nb.njit
 def roll_vortex_wake(x_vor, y_vor, gamma_airfoil, x_wake, y_wake, gamma_wake, dt):
     """
     Computes new location of vortex wake as it is convected by the local stream velocity
@@ -211,7 +212,7 @@ def roll_vortex_wake(x_vor, y_vor, gamma_airfoil, x_wake, y_wake, gamma_wake, dt
     :param y_vor: y-coords of vortices on airfoil
     :param x_wake: x-coords of vortices in the wake
     :param y_wake: y-coords of vortices in the wake
-    :return:
+    :return: new x_wake and y_wake
     """
 
     uw_mat = np.zeros((len(x_wake), 2))
