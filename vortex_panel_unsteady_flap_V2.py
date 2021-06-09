@@ -404,9 +404,13 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         print('   ...Calculating lift and pressure.\n')
 
         # Secondary computations
-        dLj = rho * U_0 * gamma_vec           # Lift difference
-        L = np.sum(dLj)                         # Total Lift
-        Cl = L / (0.5 * rho * U_0 ** 2 * c)     # Lift coefficient
+        # todo: compute velocity components, pressures, and loads
+        # dLj = rho * U_0 * gamma_vec           # Lift difference
+        # L = np.sum(dLj)                         # Total Lift
+        # Cl = L / (0.5 * rho * U_0 ** 2 * c)     # Lift coefficient
+        #
+        # dpj = rho * U_0 * gamma_vec / dc      # Pressure difference
+        # dcpj = dpj/(0.5 * rho * (U_0**2))       # Pressure coefficient difference between upper and lower surface
 
         dpj = rho * U_0 * gamma_vec / dc      # Pressure difference
         dcpj = dpj/(0.5 * rho * (U_0**2))       # Pressure coefficient difference between upper and lower surface
