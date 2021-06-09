@@ -4,6 +4,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.cm import ScalarMappable
+import numba as nb
 
 # ---------------------------------- #
 # Flags
@@ -114,52 +115,89 @@ def indvel(gammaj, x, y, xj, yj):  # Formula 11.1
 
     return uv
 
+@nb.njit
+def lumpvor2d(xcol, zcol, xvor, zvor, circvor=1):
+    """
+    Compute the velocity at an arbitrary collocation point (xcol, zcol) due
+    to vortex element of circulation circvor, placed at (xvor, zvor).
 
-def aijmatrix(xi, yi, xj, yj, Npan, ni):  # Calculation of the influence coefficients
+    :param xcol: x-coordinate of the collocation point
+    :param zcol: z-coordinate of the collocation point
+    :param xvor: x-coordinate of the vortex
+    :param zvor: z-coordinate of the vortex
+    :param circvor: circulation strength of the vortex (base units)
+
+    :return: 1D array containing the velocity vector (u, w) (x-comp., z-comp.)
+    :rtype: ndarray
+
+    """
+
+    # transformation matrix for the x, z distance between two points
+    dcm = np.array([[0.0, 1.0],
+                    [-1.0, 0.0]])
+
+    # magnitude of the distance between two points
+    r_vortex_sq = (xcol - xvor) ** 2 + (zcol - zvor) ** 2
+
+    # the distance in x, and z between two points
+    dist_vec = np.array([xcol - xvor, zcol - zvor])
+
+    norm_factor = circvor / (2.0 * np.pi * r_vortex_sq)  # circulation at
+    # vortex element / circumferential distance
+
+    # induced velocity of vortex element on collocation point
+    vel_vor = norm_factor * dcm @ dist_vec
+
+    return vel_vor
+
+
+def aijmatrix(xcols, ycols, xvorts, yvorts, Npan, ni):  # Calculation of the influence coefficients
 
     print('   ...Computing influence matrix.')
 
-    aijmatrix = np.matrix(np.zeros((Npan, Npan)))
+    a_mat = np.zeros((Npan, Npan))
 
     print('   ...Computing induced velocities.')
 
     for i in range(0, Npan):
-
         for j in range(0, Npan):
+            vel_vor = lumpvor2d(xcols[i], ycols[i], xvorts[j], yvorts[j])
+            a_ij = vel_vor @ ni[:, i]
+            aijmatrix[i, j] = a_ij
 
-            uvmatrix = np.transpose(indvel(1, xi[i], yi[i], xj[j], yj[j]))  # Calculate (u,w), Formula 11.1
-            nmatrix = np.transpose(np.matrix([ni[0, i], ni[1, i]]))  # Prepare ni matrix
-            aij = np.matmul(uvmatrix, nmatrix)  # Formula 11.5
-            aijmatrix[i, j] = aij  # Define aijmatrix
+    return a_mat
 
-    return aijmatrix
-
-
-def aijmatrix2(xi, yi, xj, yj, Npan, ni, wake_gamma):  # Calculation of the influence coefficients
+# @nb.njit
+def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
+    """
+    Calculation of the influence coefficients
+    :param xi: x-coords of collocation points
+    :param yi: y-coords of collocation points
+    :param a_mat: influence coefficient matrix excluding the wake influence
+    :param x_twake: x-pos of trailing edge wake
+    :param y_twake: y-pos of trailing edge wake
+    :param ni: array containing the normal vectors
+    :param wake_gamma: circulation of the wake vortex (unit strength)
+    :return:
+    """
 
     print('   ...Computing influence matrix.')
-
-    aijmatrix = np.matrix(np.ones((Npan + 1, Npan + 1)))
     # Create induced velocities array
-    v_norm = np.zeros((Npan + 1, 1))
+    v_norm = np.zeros(Npan + 1)
 
     print('   ...Computing induced velocities.')
 
+    # determine influence coefficient from latest wake vorticity
     for i in range(Npan):
+        uv = lumpvor2d(xi[i], yi[i], x_wake[-1], y_wake[-1])
+        a_mat[i, -1] = uv @ ni[:, i]
 
-        uvmatrix = np.transpose(indvel(1, xi[i], yi[i], xj, yj))    # Calculate (u,w), Formula 11.1
-        nmatrix = np.transpose(np.matrix([ni[0, i], ni[1, i]]))         # Prepare ni matrix
-        aij = np.matmul(uvmatrix, nmatrix)                              # Formula 11.5
-        aijmatrix[i, -1] = aij                                           # Define aijmatrix
+        # determine RHS contribution of wake vortices (except trailing edge wake vortex)
+        for j in range(len(wake_gamma[:-1])):
+            uv = lumpvor2d(xi[i], yi[i], x_wake[j], y_wake[j])
+            v_norm[i] = v_norm[i] + uv @ ni[:, i]
 
-        for j in range(len(wake_gamma)):
-
-            uvmatrix = np.transpose(indvel(1, xi[i], yi[i], xj, yj))  # Calculate (u,w), Formula 11.1
-            nmatrix = np.transpose(np.matrix([ni[0, i], ni[1, i]]))  # Prepare ni matrix
-            vnorm = np.matmul(uvmatrix, nmatrix)  # Formula 11.5
-            v_norm[i] = v_norm[i] + vnorm
-
-    return aijmatrix, v_norm
+    return a_mat, v_norm
 
 def steady_VP(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho, key):
 
@@ -282,6 +320,8 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 
     # Solve system #
     aij_mat = aijmatrix(xcp, ycp, xc4, yc4, Npan, ni)  # aij matrix
+    # add additional column THEN add new row
+    aij_mat = np.vstack((np.hstack((aij_mat, np.zeros((Npan, 1)))), np.ones((1, Npan + 1))))
 
     # Initial variables
     gammamatrix = np.zeros(1)
@@ -338,7 +378,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 
         # Calculate influence matrix related to last shedded vortex
         # Calculate wake induced velocities
-        aij_mat, v_norm = aijmatrix2(xcp, ycp, xwake[t], ywake[t], Npan, ni, wake_gamma)   # aij matrix
+        aij_mat, v_norm = aijmatrix2(aij_mat, xcp, ycp, xwake, ywake, ni, wake_gamma)   # aij matrix
 
         # Non-circulatory
         RHS = U_0 * np.sin(alpha_arr[t]) * np.ones(Npan+1)
@@ -354,7 +394,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         RHS[-1] = -f_gamma
 
         #gammamatrix = np.linalg.solve(aij_mat, RHS)         # Find circulation of each vortex point
-        gammamatrix = np.linalg.inv(aij_mat)@RHS
+        gamma_vec = np.linalg.inv(aij_mat) @ RHS
         # wake_gamma = np.append(wake_gamma, gammamatrix[-1])
         # print(gammamatrix[:-1].shape)
         # gamma_arr[t] = np.sum(gammamatrix[:-1])
@@ -362,14 +402,14 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         print('   ...Calculating lift and pressure.\n')
 
         # Secondary computations
-        dLj = rho * U_0 * gammamatrix           # Lift difference
+        dLj = rho * U_0 * gamma_vec           # Lift difference
         L = np.sum(dLj)                         # Total Lift
         Cl = L / (0.5 * rho * U_0 ** 2 * c)     # Lift coefficient
 
-        dpj = rho * U_0 * gammamatrix / dc      # Pressure difference
+        dpj = rho * U_0 * gamma_vec / dc      # Pressure difference
         dcpj = dpj/(0.5 * rho * (U_0**2))       # Pressure coefficient difference between upper and lower surface
 
-    return xc4, yc4, dcpj, Cl, gammamatrix, xp, yp
+    return xc4, yc4, dcpj, Cl, gamma_vec, xp, yp
 
 # ---------------------------------- #
 # Solver
