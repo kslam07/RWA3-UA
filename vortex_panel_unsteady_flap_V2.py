@@ -4,7 +4,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.cm import ScalarMappable
-import numba as nb
+import numba as nb  # trying out write unvectorized code with Numba jitting
 import warnings
 warnings.simplefilter('ignore', category=nb.errors.NumbaPerformanceWarning)
 
@@ -140,6 +140,9 @@ def lumpvor2d(xcol, zcol, xvor, zvor, circvor=1):
 
     # magnitude of the distance between two points
     r_vortex_sq = (xcol - xvor) ** 2 + (zcol - zvor) ** 2
+
+    if r_vortex_sq < 1e-8:  # some arbitrary threshold
+        return np.array([0.0, 0.0])
 
     # the distance in x, and z between two points
     dist_vec = np.array([xcol - xvor, zcol - zvor])
