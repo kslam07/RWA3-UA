@@ -204,6 +204,34 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
 
     return a_mat, v_norm
 
+def roll_vortex_wake(x_vor, y_vor, gamma_airfoil, x_wake, y_wake, gamma_wake, dt):
+    """
+    Computes new location of vortex wake as it is convected by the local stream velocity
+    :param x_vor: x-coords of vortices on airfoil
+    :param y_vor: y-coords of vortices on airfoil
+    :param x_wake: x-coords of vortices in the wake
+    :param y_wake: y-coords of vortices in the wake
+    :return:
+    """
+
+    uw_mat = np.zeros((len(x_wake), 2))
+
+    for i, (x_wake_i, y_wake_i) in enumerate(zip(x_wake, y_wake)):
+        uw = np.zeros(2)  # initialize variable to store total induced velocity
+        # contribution from the vortices of the airfoil
+        for x_vor_j, y_vor_j, gamma_airfoil_j in zip(x_vor, y_vor, gamma_airfoil):
+            uw += lumpvor2d(x_wake_i, y_wake_i, x_vor_j, y_vor_j, gamma_airfoil_j)
+        # contribution from the vortices in the wake
+        for x_wake_k, y_wake_k, gamma_wake_k in zip(x_wake, y_wake, gamma_wake):
+            uw += lumpvor2d(x_wake_i, y_wake_i, x_wake_k, y_wake_k, gamma_wake_k)
+        uw_mat[i] = uw
+
+    # determine change in (x,y) coordinates of wake vortices
+    x_wake = x_wake + uw_mat[:, 0] * dt
+    y_wake = y_wake + uw_mat[:, 1] * dt
+
+    return  x_wake, y_wake
+
 def steady_VP(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho, key):
 
     print('   ...Creating geometry.')
@@ -415,8 +443,8 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         # dpj = rho * U_0 * gamma_vec / dc      # Pressure difference
         # dcpj = dpj/(0.5 * rho * (U_0**2))       # Pressure coefficient difference between upper and lower surface
 
-        dpj = rho * U_0 * gamma_vec / dc      # Pressure difference
-        dcpj = dpj/(0.5 * rho * (U_0**2))       # Pressure coefficient difference between upper and lower surface
+        # compute wake sheet roll-up
+        xwake, ywake = roll_vortex_wake(xc4, yc4, gamma_vec, xwake, ywake, wake_gamma, dt=1)  # todo: change dt!!!
 
     return xc4, yc4, dcpj, Cl, gamma_vec, xp, yp
 
