@@ -5,6 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.cm import ScalarMappable
 import numba as nb
+import warnings
+warnings.simplefilter('ignore', category=nb.errors.NumbaPerformanceWarning)
 
 # ---------------------------------- #
 # Flags
@@ -167,7 +169,7 @@ def aijmatrix(xcols, ycols, xvorts, yvorts, Npan, ni):  # Calculation of the inf
 
     return a_mat
 
-# @nb.njit
+@nb.njit
 def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
     """
     Calculation of the influence coefficients
