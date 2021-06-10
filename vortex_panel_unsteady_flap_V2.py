@@ -55,8 +55,8 @@ amp = 15                # (deg) Amplitude of the pitching motion
 
 # Time
 start = 0                                   # Start time
-stop = np.pi/(8*omega)                      # Stop time
-dt = 0.002                                  # Time step
+stop = 10                                   # Stop time
+dt = 0.1                                    # Time step
 trange = np.arange(start, stop + dt, dt)    # Time log
 
 # ---------------------------------- #
@@ -179,8 +179,8 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
     :param xi: x-coords of collocation points
     :param yi: y-coords of collocation points
     :param a_mat: influence coefficient matrix excluding the wake influence
-    :param x_twake: x-pos of trailing edge wake
-    :param y_twake: y-pos of trailing edge wake
+    :param x_wake: x-pos of trailing edge wake
+    :param y_wake: y-pos of trailing edge wake
     :param ni: array containing the normal vectors
     :param wake_gamma: circulation of the wake vortex (unit strength)
     :return: new influence matrix (a_mat) and RHS contribution of the wake vortices (v_norm)
@@ -288,13 +288,6 @@ def steady_VP(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho, key):
     # Solve system #
     aij_mat = aijmatrix(xcp, ycp, xc4, yc4, Npan, ni)   # aij matrix
     RHS = U_0 * np.sin(alpha_i) * np.ones(Npan)  # RHS vector
-    # if enable_flap:
-    #
-    #     RHS = U_0 * np.sin(alpha_i + a_flap) * np.ones(Npan)         # RHS vector
-    #
-    # else:
-    #
-    #     RHS = U_0 * np.sin(alpha_i) * np.ones(Npan)         # RHS vector
 
     gammamatrix = np.linalg.solve(aij_mat, RHS)         # Find circulation of each vortex point
 
@@ -358,9 +351,9 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
     aij_mat = np.vstack((np.hstack((aij_mat, np.zeros((Npan, 1)))), np.ones((1, Npan + 1))))
 
     # Initial variables
-    gammamatrix = np.zeros(1)
-    fix_gamma = np.zeros((1, len(trange)))
-    wake_gamma = np.zeros(1)
+    gamma_vec = np.zeros(1)
+    fix_gamma = np.zeros((len(trange), 1))
+    wake_gamma = np.array([])
     xwake = np.array([x[-1] - c/4])
     ywake = np.array([0])
 
@@ -369,13 +362,13 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
     yp_arr = np.zeros((Npan + 1, len(trange)))
     v_map_arr = np.zeros((len(X[:, 1]), len(Y[1, :]), len(trange)))
     cp_map_arr = np.zeros((len(X[:, 1]), len(Y[1, :]), len(trange)))
-    gamma_arr = np.zeros((Npan + 1, len(trange)))
+    gamma_arr = np.zeros((len(trange), Npan + 1))
 
-    print('   ...Start time loop.')
+    print('   ...Start time loop.\n')
 
-    for t in range(len(trange)):
+    for t in range(len(trange)-1):
 
-        print(f"   Time step: {t+1}/{len(trange)}")
+        print(f"   Time step: {t+1}/{len(trange)-1}")
         print('   ...Creating geometry.')
 
         # center LE at the origin
@@ -407,7 +400,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         print('   ...Solving linear system for circulation strengths.')
 
         # Sum circulations except last one
-        f_gamma = np.sum(gammamatrix[:-1])
+        f_gamma = np.sum(gamma_vec[:-1])
         fix_gamma[t] = f_gamma
 
         # Calculate influence matrix related to last shedded vortex
@@ -427,11 +420,9 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         RHS = U_0 * np.sin(alpha_arr[t]) * np.ones(Npan + 1) + v_norm + v_pitch_n
         RHS[-1] = -f_gamma
 
-        #gammamatrix = np.linalg.solve(aij_mat, RHS)         # Find circulation of each vortex point
         gamma_vec = np.linalg.inv(aij_mat) @ RHS
-        # wake_gamma = np.append(wake_gamma, gammamatrix[-1])
-        # print(gammamatrix[:-1].shape)
-        # gamma_arr[t] = np.sum(gammamatrix[:-1])
+        wake_gamma = np.append(wake_gamma, gamma_vec[-1])
+        gamma_arr[t] = np.sum(gamma_vec[:-1])
 
         print('   ...Calculating lift and pressure.\n')
 
@@ -445,9 +436,15 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         # dcpj = dpj/(0.5 * rho * (U_0**2))       # Pressure coefficient difference between upper and lower surface
 
         # compute wake sheet roll-up
-        xwake, ywake = roll_vortex_wake(xc4, yc4, gamma_vec, xwake, ywake, wake_gamma, dt)
+        #xwake, ywake = roll_vortex_wake(xc4, yc4, gamma_vec, xwake, ywake, wake_gamma, dt)
 
-    return xc4, yc4, dcpj, Cl, gamma_vec, xp, yp
+        xwake = xwake + (U_0 * dt)
+        xwake_new = xp[-1] + 0.25 * (xwake[t] - xp[-1])
+        ywake_new = yp[-1] + 0.25 * (ywake[t] - yp[-1])
+        xwake = np.append(xwake, xwake_new)
+        ywake = np.append(ywake, ywake_new)
+
+    return xc4, yc4, xp, yp, gamma_vec, wake_gamma, xwake, ywake
 
 # ---------------------------------- #
 # Solver
@@ -488,38 +485,76 @@ if plot_velocity_field or plot_pressure_field:
 
         result = unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, np.deg2rad(a_flap), c, c_flap, U_0, rho)
 
+        xx = result[0]
+        yy = result[1]
+        xp = result[2]
+        yp = result[3]
+        gammaB = result[4]
+        gammaW = result[5]
+        xwake = result[6]
+        ywake = result[7]
+
+        # Build velocity and pressure distribution
+        u = np.ones((len(X), len(Y))) * U_0
+        v = np.zeros((len(X), len(Y)))
+        v_map = np.zeros((len(X), len(Y)))
+        cp_map = np.zeros((len(X), len(Y)))
+
+        print('...Creating velocity and pressure distribution.\n')
+
+        for i in range(len(X[:, 1])):
+
+            print('   ...Row:', i + 1)
+
+            for j in range(len(Y[1, :])):
+
+                for g in range(len(gammaB) - 1):
+
+                    uv = indvel(gammaB[g], X[i, j], Y[i, j], xx[g], yy[g])
+                    u[i, j] = u[i, j] + uv[0]
+                    v[i, j] = v[i, j] + uv[1]
+
+                for g in range(len(gammaW)):
+
+                    uv = indvel(gammaW[g], X[i, j], Y[i, j], xwake[g+1], ywake[g+1])
+                    u[i, j] = u[i, j] + uv[0]
+                    v[i, j] = v[i, j] + uv[1]
+
+                v_map[i, j] = np.sqrt(u[i, j] ** 2 + v[i, j] ** 2)
+                cp_map[i, j] = 1 - (v_map[i, j] / U_0) ** 2
+
     else:
 
         result = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(15), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
 
-    xx = result[0]
-    yy = result[1]
-    gammaM = result[4]
-    xp = result[5]
-    yp = result[6]
+        xx = result[0]
+        yy = result[1]
+        gammaM = result[4]
+        xp = result[5]
+        yp = result[6]
 
-    # Build velocity and pressure distribution
-    u = np.ones((len(X), len(Y))) * U_0
-    v = np.zeros((len(X), len(Y)))
-    v_map = np.zeros((len(X), len(Y)))
-    cp_map = np.zeros((len(X), len(Y)))
+        # Build velocity and pressure distribution
+        u = np.ones((len(X), len(Y))) * U_0
+        v = np.zeros((len(X), len(Y)))
+        v_map = np.zeros((len(X), len(Y)))
+        cp_map = np.zeros((len(X), len(Y)))
 
-    print('...Creating velocity and pressure distribution.\n')
+        print('...Creating velocity and pressure distribution.\n')
 
-    for i in range(len(X[:, 1])):
+        for i in range(len(X[:, 1])):
 
-        print('   ...Row:', i+1)
+            print('   ...Row:', i+1)
 
-        for j in range(len(Y[1, :])):
+            for j in range(len(Y[1, :])):
 
-            for g, gamma in enumerate(gammaM):
+                for g, gamma in enumerate(gammaM):
 
-                uv = indvel(gamma, X[i, j], Y[i, j], xx[g], yy[g])
-                u[i, j] = u[i, j] + uv[0]
-                v[i, j] = v[i, j] + uv[1]
+                    uv = indvel(gamma, X[i, j], Y[i, j], xx[g], yy[g])
+                    u[i, j] = u[i, j] + uv[0]
+                    v[i, j] = v[i, j] + uv[1]
 
-            v_map[i, j] = np.sqrt(u[i, j]**2 + v[i, j]**2)
-            cp_map[i, j] = 1 - (v_map[i, j]/U_0)**2
+                v_map[i, j] = np.sqrt(u[i, j]**2 + v[i, j]**2)
+                cp_map[i, j] = 1 - (v_map[i, j]/U_0)**2
 
     print('')
 
