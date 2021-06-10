@@ -204,6 +204,14 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
 
     return a_mat, v_norm
 
+def compute_pressure_and_loads():
+    """
+    Computes the lift and drag based on the velocity components and circulation
+    :return: pressure difference, lift, moment, drag
+    """
+
+    raise NotImplementedError
+
 @nb.njit
 def roll_vortex_wake(x_vor, y_vor, gamma_airfoil, x_wake, y_wake, gamma_wake, dt):
     """
