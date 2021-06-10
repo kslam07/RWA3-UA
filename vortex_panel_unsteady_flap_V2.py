@@ -204,9 +204,16 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
 
     return a_mat, v_norm
 
-def compute_pressure_and_loads():
+def compute_pressure_and_loads(rhs, gamma_arr, tan_vec, l_panels, dt):
     """
     Computes the lift and drag based on the velocity components and circulation
+
+    :param rhs: current RHS vector of linear system
+    :param gamma_arr: 2D array containing the previous steps
+    :param tan_vec: 2D array containing the tangential unit vector of the airfoil panels
+    :param l_panels: 1D array containing the panel length
+    :param dt: timestep
+
     :return: pressure difference, lift, moment, drag
     """
 
