@@ -43,21 +43,21 @@ a_flap = 15             # (deg) Flap deflection in degrees
 Npan_flap = 10          # Number of panels on flap
 
 # Mesh
-xres = 50               # Grid discretization in x direction
-yres = 50               # Grid discretization in y direction
+xres = 20               # Grid discretization in x direction
+yres = 20               # Grid discretization in y direction
 
 # Operations
 rho = 1.225             # (kg/m^3) free-stream density
 U_0 = 10                # (m/s) free-stream velocity
 k = 0.1                 # (Hz) Reduced frequency: 0.02, 0.05, 0.1
 omega = k*2*U_0/c       # (Hz) Frequency of the unsteadiness
-amp = 15                # (deg) Amplitude of the pitching motion
+amp = 1                # (deg) Amplitude of the pitching motion
 
 # Time
 start = 0                                   # Start time
-stop = 10                                   # Stop time
+stop = 1                                   # Stop time
 dt = 0.1                                    # Time step
-trange = np.arange(start, stop + dt, dt)    # Time log
+trange = np.linspace(start, stop, 5)    # Time log
 
 # ---------------------------------- #
 # Create Grid
@@ -172,8 +172,8 @@ def aijmatrix(xcols, ycols, xvorts, yvorts, Npan, ni):  # Calculation of the inf
 
     return a_mat
 
-@nb.njit
-def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
+# @nb.njit
+def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma, u_kin, v_kin):
     """
     Calculation of the influence coefficients
     :param xi: x-coords of collocation points
@@ -183,26 +183,27 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
     :param y_wake: y-pos of trailing edge wake
     :param ni: array containing the normal vectors
     :param wake_gamma: circulation of the wake vortex (unit strength)
+    :param u_kin: kinematic velocity u-component
+    :param v_kin: kinematic velocity v-component
     :return: new influence matrix (a_mat) and RHS contribution of the wake vortices (v_norm)
     """
 
     print('   ...Computing influence matrix.')
-    # Create induced velocities array
-    v_norm = np.zeros(Npan + 1)
-
+    # stores RHS vector
+    rhs = np.zeros(Npan + 1)
     print('   ...Computing induced velocities.')
 
     # determine influence coefficient from latest wake vorticity
     for i in range(Npan):
+        v_norm = np.zeros(2)  # store interim result of wake velocity contribution
         uv = lumpvor2d(xi[i], yi[i], x_wake[-1], y_wake[-1])
         a_mat[i, -1] = uv @ ni[:, i]
-
         # determine RHS contribution of wake vortices (except trailing edge wake vortex)
         for j in range(len(wake_gamma[:-1])):
             uv = lumpvor2d(xi[i], yi[i], x_wake[j], y_wake[j])
-            v_norm[i] = v_norm[i] + uv @ ni[:, i]
-
-    return a_mat, v_norm
+            v_norm += uv @ ni[:, i]
+        rhs[i] = -np.array([v_norm[0] + u_kin[i], v_norm[1] + v_kin[i]]) @ ni[:, i]
+    return a_mat, rhs
 
 def compute_pressure_and_loads(rhs, gamma_arr, tan_vec, l_panels, dt):
     """
@@ -319,9 +320,16 @@ def steady_VP(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho, key):
     return xc4, yc4, dcpj, Cl, gammamatrix, xp, yp
 
 
-def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap, U_0, rho):
+def unsteady_VP(y, x, Npan, Npan_flap, theta_arr, dtheta_arr, a_flap, c, c_flap, U_0, rho):
 
     print('   ...Initialize influence matrix.')
+
+    # Storage arrays for all time steps
+    xp_arr = np.zeros((Npan + 1, len(trange)))  # x-coords panel points in inertial frame
+    yp_arr = np.zeros((Npan + 1, len(trange)))  # y-coords panel points in inertial frame
+    v_map_arr = np.zeros((len(X[:, 1]), len(Y[1, :]), len(trange)))  # 2D array containing veloctiy field
+    cp_map_arr = np.zeros((len(X[:, 1]), len(Y[1, :]), len(trange)))  # 2D array containing pressure field
+    gamma_arr = np.zeros((len(trange), Npan + 1))  # 2D array containing circulation of airfoil at each timestep
 
     # Add a flap (OPTIONAL)
     if enable_flap:
@@ -341,8 +349,9 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 
         Npan = Npan + Npan_flap
 
+    # COMPUTE SYSTEM AT T=0
     # center LE at the origin
-    x = x - c / 4
+    # x = x - c / 4
 
     # Calculate dx,dy,dc component per panel (dc = panel length)
     dx = np.delete(np.roll(x, -1) - x, -1)
@@ -352,6 +361,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
     # Further induced geometry calculations
     alpha_i = np.arctan2(dy, dx)  # Induced AoA by panel slope
     ni = np.array([np.sin(-alpha_i), np.cos(-alpha_i)])  # Normal vector; First index = x, second index = y
+    ti = np.array([np.cos(alpha_i), -np.sin(alpha_i)])  # tangential vector
 
     # Calculate x,y coordinates of the quarter cord (c4) and collocation points (cp)
     xc4 = x[0:-1] + dx / 4
@@ -360,61 +370,37 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
     xcp = x[0:-1] + dx * (3 / 4)
     ycp = y[0:-1] + dy * (3 / 4)
 
-    # Solve system #
+    # Solve system
     aij_mat = aijmatrix(xcp, ycp, xc4, yc4, Npan, ni)  # aij matrix
     # add additional column THEN add new row
     aij_mat = np.vstack((np.hstack((aij_mat, np.zeros((Npan, 1)))), np.ones((1, Npan + 1))))
 
-    # Initial variables
+    # initial variables
     gamma_vec = np.zeros(1)
     fix_gamma = np.zeros((len(trange), 1))
     wake_gamma = np.array([])
-    xwake = np.array([x[-1] - c/4])
+    xwake = np.array([x[-1] + c/4])  # todo: placed 0.2 - 0.3 the distance covered by TE; how to determine?
     ywake = np.array([0])
 
-    # Storage arrays for all time steps
-    xp_arr = np.zeros((Npan + 1, len(trange)))
-    yp_arr = np.zeros((Npan + 1, len(trange)))
-    v_map_arr = np.zeros((len(X[:, 1]), len(Y[1, :]), len(trange)))
-    cp_map_arr = np.zeros((len(X[:, 1]), len(Y[1, :]), len(trange)))
-    gamma_arr = np.zeros((len(trange), Npan + 1))
+    # trailing edge position at previous iteration
+    x_te_im1 = x[-1]
+    y_te_im1 = y[-1]
 
     print('   ...Start time loop.\n')
 
-    for t in range(len(trange)-1):  # not actually time but nth timestep
+    for t in range(1, len(trange[:-1])):  # not actually time but nth timestep
 
         print(f"   Time step: {t+1}/{len(trange)-1}")
         print('   ...Creating geometry.')
 
-        # center LE at the origin | # todo: this should be wrong, you did that above the loop already
-        x = x - c/4
+        # update kinematics (movement of airfoil in inertial frame
+        x_inertial = - U_0 * trange[t]  # horizontal freestream velocity
+        z_inertial = 0.0  # we don't have normal freestream velocity component
 
-        # Transform relative to inertial ref. frame   todo: this is rotation in RELATIVE reference frame
-                                                    # todo: add (X0, Y0) for position in INERTIAl reference frame
-        # todo: hint - declare new variables for X, Y location
-        xp = x * np.cos(alpha_arr[t]) + y * np.sin(alpha_arr[t])
-        yp = -x * np.sin(alpha_arr[t]) + y * np.cos(alpha_arr[t])
-
-        # todo: append position in inertial frame instead of relative
-        xp_arr[:, t] = xp
-        yp_arr[:, t] = yp
-
-        # Calculate dx,dy,dc component per panel (dc = panel length)
-        dx = np.delete(np.roll(xp, -1) - xp, -1)
-        dy = np.delete(np.roll(yp, -1) - yp, -1)
-        dc = np.sqrt(dx**2 + dy**2)
-
-        # Further induced geometry calculations | todo: AoA defined in rel. ref. frame so is the same for every timestep
-        alpha_i = np.arctan2(dy, dx)                            # Induced AoA by panel slope
-        # todo: idem for ni
-        ni = np.array([np.sin(-alpha_i), np.cos(-alpha_i)])    # Normal vector; First index = x, second index = y
-
-        # Calculate x,y coordinates of the quarter cord (c4) and collocation points (cp) | todo: idem for cp
-        xc4 = xp[0:-1] + dx/4
-        yc4 = yp[0:-1] + dy/4
-
-        xcp = xp[0:-1] + dx * (3/4)
-        ycp = yp[0:-1] + dy * (3/4)
+        # Transform relative to inertial ref. frame
+        # alpha_arr[t] contains pitching oscillation of the airfoil, i.e. sin(omega t)
+        xp = x * np.cos(theta_arr[t]) + y * np.sin(theta_arr[t]) + x_inertial
+        yp = -x * np.sin(theta_arr[t]) + y * np.cos(theta_arr[t]) + z_inertial
 
         print('   ...Solving linear system for circulation strengths.')
 
@@ -422,26 +408,19 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         f_gamma = np.sum(gamma_vec[:-1])
         fix_gamma[t] = f_gamma
 
+        # compute kinematic velocity components (RHS)
+        u_kin = np.cos(theta_arr[t]) * U_0 - dtheta_arr[t] * dc  # flat plate so xcp == eta
+        v_kin = np.sin(theta_arr[t]) * U_0 + dtheta_arr[t] * xcp  # shape of the airfoil is contant (rigid body)
+
         # Calculate last column influence matrix (influence of trailing edge vortex wake)
-        aij_mat, v_norm = aijmatrix2(aij_mat, xcp, ycp, xwake, ywake, ni, wake_gamma)   # aij matrix
+        # todo: use (x,y) of wake not (X, Y)!
+        aij_mat, rhs = aijmatrix2(aij_mat, xcp, ycp, xwake, ywake, ni, wake_gamma, u_kin, v_kin)   # aij matrix
 
-        # Non-circulatory
-        RHS = U_0 * np.sin(alpha_arr[t]) * np.ones(Npan+1)
+        # add RHS contribution to Kelvin condition
+        rhs[-1] = f_gamma  # circulation of airfoil at previous timestep
 
-        # Pitching RHS | should be the same as eqn 13.116
-        xcp = xcp.reshape([Npan, 1])
-        ycp = ycp.reshape([Npan, 1])
-        a = np.concatenate((xcp, ycp, np.zeros((Npan, 1))), axis=1)
-        b = np.concatenate((np.zeros((Npan, 2)), np.ones((Npan, 1)) * dalpha_arr[t]), axis=1)
-        v_pitch = np.cross(-a, b)
-        v_pitch_n = np.concatenate(((v_pitch[:, :2]*np.asarray(ni).T).sum(axis=1), [0]), axis=0)
-        RHS = U_0 * np.sin(alpha_arr[t]) * np.ones(Npan + 1) + v_norm + v_pitch_n
-        RHS[-1] = -f_gamma
-
-        # directly solve system and obtain new circulation over airfoil and trailing edge vortex wake
-        gamma_vec = np.linalg.inv(aij_mat) @ RHS
+        gamma_vec = np.linalg.inv(aij_mat) @ rhs
         wake_gamma = np.append(wake_gamma, gamma_vec[-1])  # log circulation per panel result
-        gamma_arr[t] = np.sum(gamma_vec[:-1])  # log total circulation over airfoil
 
         print('   ...Calculating lift and pressure.\n')
 
@@ -454,10 +433,22 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         # dpj = rho * U_0 * gamma_vec / dc      # Pressure difference
         # dcpj = dpj/(0.5 * rho * (U_0**2))       # Pressure coefficient difference between upper and lower surface
 
-        # compute wake sheet roll-up
+        # compute wake sheet roll-up in RELATIVE frame
+        # todo: convert (X, Y) wake to (x,y) wake
         xwake, ywake = roll_vortex_wake(xc4, yc4, gamma_vec, xwake, ywake, wake_gamma, dt)
 
         # todo: add new trailing wake vortex at 0.2-0.3 of the distance covered by the trailing edge
+        xwake = np.append(xwake, 0.25 * (xp[-1] - x_te_im1))
+        ywake = np.append(ywake, 0.25 * (yp[-1] - y_te_im1))
+
+        # update parameters
+        x_te_im1 = xp[-1]
+        y_te_im1 = yp[-1]
+
+        # log results
+        xp_arr[:, t] = xp
+        yp_arr[:, t] = yp
+        gamma_arr[t] = np.sum(gamma_vec[:-1])  # log total circulation over airfoil
 
     return xc4, yc4, xp, yp, gamma_vec, wake_gamma, xwake, ywake
 
@@ -475,8 +466,8 @@ y = np.copy(x) * 0.
 
 if enable_pitching:
 
-    alpha_arr = amp * np.sin(omega * trange)            # AoA log
-    dalpha_arr = amp * omega * np.cos(omega * trange)   # Derivative of AoA log
+    theta_arr = amp * np.sin(omega * trange)            # AoA log
+    dtheta_arr = amp * omega * np.cos(omega * trange)   # Derivative of AoA log
 
 if plot_cl_curve:
 
@@ -498,7 +489,7 @@ if plot_velocity_field or plot_pressure_field:
 
     if enable_pitching:
 
-        result = unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, np.deg2rad(a_flap), c, c_flap, U_0, rho)
+        result = unsteady_VP(y, x, Npan, Npan_flap, theta_arr, dtheta_arr, np.deg2rad(a_flap), c, c_flap, U_0, rho)
 
         xx = result[0]
         yy = result[1]
@@ -618,12 +609,13 @@ if plot_velocity_field:
     cmap = plt.get_cmap('jet')
     plt.title('Velocity Magnitude')
     cf = plt.contourf(X, Y, v_map, levels=levels, vmin=vmin, vmax=vmax, cmap=cmap)
-    clb = plt.colorbar(
-        ScalarMappable(norm=cf.norm, cmap=cf.cmap),
-        ticks=range(vmin, vmax+2, 2),
-        boundaries=level_boundaries,
-        values=(level_boundaries[:-1] + level_boundaries[1:]) / 2,)
-    clb.ax.set_title(r'$V$ (m/s)')
+    plt.colorbar()
+    # clb = plt.colorbar(
+    #     ScalarMappable(norm=cf.norm, cmap=cf.cmap),
+    #     ticks=range(vmin, vmax+2, 2),
+    #     boundaries=level_boundaries,
+    #     values=(level_boundaries[:-1] + level_boundaries[1:]) / 2,)
+    # clb.ax.set_title(r'$V$ (m/s)')
     plt.plot(xp, yp, '-k', lw=2.)
     plt.xlabel('x/c [-]')
     plt.ylabel('y/c [-]')
@@ -694,4 +686,4 @@ if plot_deltaP:
 
 plt.show()
 print('\nDone.')
-exit(0)
+# exit(0)
