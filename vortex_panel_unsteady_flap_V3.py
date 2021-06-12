@@ -576,32 +576,7 @@ if plot_velocity_field or plot_pressure_field:
         xwake = result[6]
         ywake = result[7]
 
-        #v_map, cp_map = compute_velocity_field(U_0, X, Y, xp, yp, gammaB, gammaW, xwake, ywake)
-
-        print('...Creating velocity and pressure distribution.\n')
-
-        # Build velocity and pressure distribution over background mesh
-        for i in range(len(X[:, 0])):
-
-            print('   ...Row:', i + 1)
-
-            for j in range(len(Y[0, :])):
-
-                for g in range(len(gammaB) - 1):
-
-                    uv = indvel(gammaB[g], X[i, j], Y[i, j], xx[g], yy[g])
-                    u[i, j] = u[i, j] + uv[0]
-                    v[i, j] = v[i, j] + uv[1]
-
-                for g in range(len(gammaW)):
-
-                    uv = indvel(gammaW[g], X[i, j], Y[i, j], xwake[g+1], ywake[g+1])
-                    u[i, j] = u[i, j] + uv[0]
-                    v[i, j] = v[i, j] + uv[1]
-
-                v_map[i, j] = np.sqrt(u[i, j] ** 2 + v[i, j] ** 2)
-                cp_map[i, j] = 1 - (v_map[i, j] / U_0) ** 2
-
+        v_map, cp_map = compute_velocity_field(U_0, X, Y, xp, yp, gammaB, gammaW, xwake, ywake)
     else:
 
         result = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(15), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
