@@ -204,7 +204,7 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
 
     return a_mat, v_norm
 
-def compute_pressure_and_loads(rhs, gamma_arr, tan_vec, l_panels, dt):
+def compute_pressure_and_loads(u_inf, v_inf, dc, gamma_vec, gamma_vec_old, theta, gamma_steady=1, rho=1.225):
     """
     Computes the lift and drag based on the velocity components and circulation
 
@@ -217,7 +217,25 @@ def compute_pressure_and_loads(rhs, gamma_arr, tan_vec, l_panels, dt):
     :return: pressure difference, lift, moment, drag
     """
 
-    raise NotImplementedError
+    # freestream speed
+    v_eff = np.sqrt(u_inf ** 2 + v_inf ** 2)
+
+    # compute time derivative contribution
+    gamma_k_old = np.cumsum(gamma_vec_old)
+    gamma_k = np.cumsum(gamma_vec)
+
+    # pressure difference
+    delta_p = rho * (v_eff * gamma_vec / dc) + (gamma_k - gamma_k_old) / dc
+
+    # lift coefficient per panel and airfoil lift coefficient
+    cl_per_sec = delta_p / (0.5 * rho * v_eff**2)
+    cl = np.sum(delta_p * dc * np.cos(theta)) / (0.5 * rho * v_eff**2)
+
+    # lift coefficient for steady-state case
+    cl_per_sec_ss = 2 * gamma_steady / v_eff / dc
+    cl_ss = np.sum(cl_per_sec_ss * dc)  # weighted average of the panel lengths
+
+    return delta_p, cl_per_sec, cl_per_sec_ss, cl, cl_ss
 
 @nb.njit()
 def compute_velocity_field(u_inf, x_mesh, y_mesh, x_vorts, y_vorts, gamma_b, gamma_w, x_wake, y_wake):
@@ -397,13 +415,13 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
     gamma_vec = np.array([])
     fix_gamma = np.zeros((len(trange), 1))
     wake_gamma = np.array([])
+    gamma_arr = np.zeros((len(trange) + 1, Npan))
     xwake = np.array([x[-1]])
     ywake = np.array([0])
 
     # Storage arrays for all time steps
     xp_arr = np.zeros((Npan + 1, len(trange)))
     yp_arr = np.zeros((Npan + 1, len(trange)))
-    gamma_arr = np.zeros((1, len(trange)))
 
     print('   ...Start time loop.\n')
 
@@ -424,8 +442,9 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         dc = np.sqrt(dx**2 + dy**2)
 
         # Further induced geometry calculations
-        alpha_i = np.arctan2(dy, dx)                            # Induced AoA by panel slope
-        ni = np.array([np.sin(-alpha_i), np.cos(-alpha_i)])    # Normal vector; First index = x, second index = y
+        alpha_i = np.arctan2(dy, dx)  # Induced AoA by panel slope
+        ni = np.array([np.sin(-alpha_i), np.cos(-alpha_i)])  # Normal vector; First index = x, second index = y
+        ti = np.array([np.cos(alpha_i), -np.sin(alpha_i)])  # Tan. vector; first index = x, second index = y
 
         # Calculate x,y coordinates of the quarter cord (c4) and collocation points (cp)
         xc4 = xp[0:-1] + dx/4
@@ -458,14 +477,10 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 
         # directly solve system and obtain new circulation over airfoil and trailing edge vortex wake
         gamma_vec = -(np.linalg.inv(aij_mat) @ RHS)
-        wake_gamma = np.append(wake_gamma, gamma_vec[-1])  # log circulation per panel result
-        gamma_arr[0][t] = np.sum(gamma_vec[:-1])  # log total circulation over airfoil
+        wake_gamma = np.append(wake_gamma, gamma_vec[-1])  # log circulation of wake
+        gamma_arr[t + 1] = gamma_vec[:-1]  # log circulation of each panel
 
         print('   ...Calculating lift and pressure.\n')
-
-        # Secondary computations
-        # todo: compute velocity components, pressures, and loads
-
 
         # compute wake sheet roll-up
         xwake, ywake = roll_vortex_wake(xc4, yc4, gamma_vec, xwake, ywake, wake_gamma, dt)
@@ -476,6 +491,10 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         xwake = np.append(xwake, xwake_new)
         ywake = np.append(ywake, ywake_new)
 
+        # Secondary computations
+        # todo: add gust if you want to implement it
+        # TODO: ARTHUR ADD STEADY-STATE COMPUTATION and replace gamma_steady with the gamma from that system!!!
+        compute_pressure_and_loads(U_0, 0.0, dc, gamma_arr[t+1], gamma_arr[t], alpha_arr[t], gamma_steady=1.0)
 
     return xc4, yc4, xp, yp, gamma_vec, wake_gamma, xwake, ywake
 
@@ -709,6 +728,10 @@ if plot_deltaP:
     plt.ylabel(r'$Cp_l - Cp_u$ [-]')
     plt.grid('True')
     plt.legend()
+
+if plot_CLcirc:
+
+    pass
 
 plt.show()
 print('\nDone.')
