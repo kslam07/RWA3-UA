@@ -26,6 +26,7 @@ plot_cl_curve       = False
 plot_velocity_field = True
 plot_pressure_field = False
 plot_deltaP         = False
+plot_CLcirc         = False
 
 # ---------------------------------- #
 # Geometry and operations parameters
@@ -730,7 +731,6 @@ if plot_deltaP:
     plt.legend()
 
 if plot_CLcirc:
-
     pass
 
 plt.show()
