@@ -15,9 +15,11 @@ warnings.simplefilter('ignore', category=nb.errors.NumbaPerformanceWarning)
 print('Start.\n')
 print('...Setting flags based on user input.')
 
+enable_cos_dist     = True
 enable_flap         = False
 enable_pitching     = True
 add_meshrefinement  = False
+apply_camber        = False
 visualize_wake      = True
 
 plot_backmesh       = False
@@ -25,8 +27,8 @@ plot_camber         = False
 plot_cl_curve       = False
 plot_velocity_field = True
 plot_pressure_field = False
-plot_deltaP         = False
 plot_CLcirc         = False
+plot_deltaP_comp    = False
 
 # ---------------------------------- #
 # Geometry and operations parameters
@@ -37,6 +39,7 @@ print('...Read global parameters.')
 # Airfoil
 Npan = 40               # Number of panels
 c = 1                   # (m) chord length
+camber = 0.04           # (x/c) max camber
 
 # Flap
 c_flap = 0.3            # Fraction of chord length
@@ -44,7 +47,7 @@ a_flap = 15             # (deg) Flap deflection in degrees
 Npan_flap = 10          # Number of panels on flap
 
 # Mesh
-xres = 200               # Grid discretization in x direction
+xres = 200              # Grid discretization in x direction
 yres = 50               # Grid discretization in y direction
 
 # Operations
@@ -77,12 +80,12 @@ else:
 if add_meshrefinement:
 
     # Add refinement in the vicinity of the flat plate
-    xrange = np.linspace(-1.0 * c, wl * c, xres)*(1 - 0.2 * np.sin(np.linspace(0, np.pi, xres)))
+    xrange = np.linspace(-2.0 * c, wl * c, xres)*(1 - 0.2 * np.sin(np.linspace(0, np.pi, xres)))
     yrange = np.linspace(-3 * c, 3 * c, yres)*(1 - 0.9 * np.sin(np.linspace(0, np.pi, yres)))
 
 else:
 
-    xrange = np.linspace(-1.0 * c, wl * c, xres)
+    xrange = np.linspace(-2.0 * c, wl * c, xres)
     yrange = np.linspace(-3 * c, 3 * c, yres)
 
 # Create grid
@@ -205,6 +208,7 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
 
     return a_mat, v_norm
 
+
 def compute_pressure_and_loads(u_inf, v_inf, dc, gamma_vec, gamma_vec_old, theta, gamma_steady=1, rho=1.225):
     """
     Computes the lift and drag based on the velocity components and circulation
@@ -295,6 +299,7 @@ def roll_vortex_wake(x_vor, y_vor, gamma_airfoil, x_wake, y_wake, gamma_wake, dt
     y_wake = y_wake + uw_mat[:, 1] * dt
 
     return  x_wake, y_wake
+
 
 def steady_VP(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho, key):
 
@@ -397,8 +402,8 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
     dy = np.delete(np.roll(y, -1) - y, -1)
 
     # Further induced geometry calculations
-    alpha_i = np.arctan2(dy, dx)  # Induced AoA by panel slope
-    ni = np.array([np.sin(-alpha_i), np.cos(-alpha_i)])  # Normal vector; First index = x, second index = y
+    alpha_i = np.arctan2(dy, dx)                            # Induced AoA by panel slope
+    ni = np.array([np.sin(-alpha_i), np.cos(-alpha_i)])     # Normal vector; First index = x, second index = y
 
     # Calculate x,y coordinates of the quarter cord (c4) and collocation points (cp)
     xc4 = x[0:-1] + dx / 4
@@ -407,9 +412,9 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
     xcp = x[0:-1] + dx * (3 / 4)
     ycp = y[0:-1] + dy * (3 / 4)
 
-    # Solve system #
+    # Solve system
     aij_mat = aijmatrix(xcp, ycp, xc4, yc4, Npan, ni)  # aij matrix
-    # add additional column THEN add new row
+    # add additional column THEN add new row to account for shed vortex
     aij_mat = np.vstack((np.hstack((aij_mat, np.zeros((Npan, 1)))), np.ones((1, Npan + 1))))
 
     # Initial variables
@@ -503,14 +508,28 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 # Solver
 # ---------------------------------- #
 
-# Discretization for X using cosine distribution
+# Number of airfoil nodes
 Npoints = Npan + 1
-#x  = np.arange(1, Npoints + 1)
-#x = c/2 * (1 - np.cos((x - 1) * np.pi/(Npoints - 1)))
-x = np.linspace(0, c, Npoints)
 
-# Flat plate
-y = np.copy(x) * 0.
+if enable_cos_dist:
+
+    # Discretization for X using cosine distribution
+    x  = np.arange(1, Npoints + 1)
+    x = c/2 * (1 - np.cos((x - 1) * np.pi/(Npoints - 1)))
+
+else:
+
+    x = np.linspace(0, c, Npoints)
+
+if apply_camber:
+
+    # naca 4 series camber
+    y = naca4(c, camber, 0.4, x)
+
+else:
+
+    # Flat plate
+    y = np.copy(x) * 0.
 
 if enable_pitching:
 
@@ -522,18 +541,31 @@ if plot_cl_curve:
     print('...Building lift curve.')
     print('...Running solver.\n')
 
-    alpha_range = np.arange(-4, 15)         # Range of AoA
-    cl_arr = np.zeros(len(alpha_range))     # Lift coefficient log
+    alpha_range = np.arange(-4, 15)  # Range of AoA
+    cl_arr = np.zeros(len(alpha_range))  # Lift coefficient log
 
-    for i, alpha in enumerate(alpha_range):
+    if enable_pitching:
 
-        print(f"   Alpha: {alpha} deg")
-        temp = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(alpha), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
-        cl_arr[i] = temp[3]
+        placeholder = 1
+        # todo: implement circulatory cl
+
+    else:
+
+        for i, alpha in enumerate(alpha_range):
+
+            print(f"   Alpha: {alpha} deg")
+            temp = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(alpha), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+            cl_arr[i] = temp[3]
 
 if plot_velocity_field or plot_pressure_field:
 
     print('...Running solver.\n')
+
+    # velocity and pressure logs
+    u = np.ones((len(X[:, 0]), len(Y[0, :]))) * U_0
+    v = np.zeros((len(X[:, 0]), len(Y[0, :])))
+    v_map = np.zeros((len(X[:, 0]), len(Y[0, :])))
+    cp_map = np.zeros((len(X[:, 0]), len(Y[0, :])))
 
     if enable_pitching:
 
@@ -548,7 +580,32 @@ if plot_velocity_field or plot_pressure_field:
         xwake = result[6]
         ywake = result[7]
 
-        v_map, cp_map = compute_velocity_field(U_0, X, Y, xp, yp, gammaB, gammaW, xwake, ywake)
+        #v_map, cp_map = compute_velocity_field(U_0, X, Y, xp, yp, gammaB, gammaW, xwake, ywake)
+
+        print('...Creating velocity and pressure distribution.\n')
+
+        # Build velocity and pressure distribution over background mesh
+        for i in range(len(X[:, 0])):
+
+            print('   ...Row:', i + 1)
+
+            for j in range(len(Y[0, :])):
+
+                for g in range(len(gammaB) - 1):
+
+                    uv = indvel(gammaB[g], X[i, j], Y[i, j], xx[g], yy[g])
+                    u[i, j] = u[i, j] + uv[0]
+                    v[i, j] = v[i, j] + uv[1]
+
+                for g in range(len(gammaW)):
+
+                    uv = indvel(gammaW[g], X[i, j], Y[i, j], xwake[g+1], ywake[g+1])
+                    u[i, j] = u[i, j] + uv[0]
+                    v[i, j] = v[i, j] + uv[1]
+
+                v_map[i, j] = np.sqrt(u[i, j] ** 2 + v[i, j] ** 2)
+                cp_map[i, j] = 1 - (v_map[i, j] / U_0) ** 2
+
     else:
 
         result = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(15), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
@@ -559,14 +616,9 @@ if plot_velocity_field or plot_pressure_field:
         xp = result[5]
         yp = result[6]
 
-        # Build velocity and pressure distribution
-        u = np.ones((len(X), len(Y))) * U_0
-        v = np.zeros((len(X), len(Y)))
-        v_map = np.zeros((len(X), len(Y)))
-        cp_map = np.zeros((len(X), len(Y)))
-
         print('...Creating velocity and pressure distribution.\n')
 
+        # Build velocity and pressure distribution over background mesh
         for i in range(len(X[:, 0])):
 
             print('   ...Row:', i+1)
@@ -618,7 +670,7 @@ if plot_velocity_field:
 
     if enable_pitching:
 
-        levels = 400
+        levels = 1000
         men = np.mean(v_map)
         rms = np.sqrt(np.mean((v_map-men) ** 2))
         vmin = int(round(men - 3 * rms))
@@ -626,20 +678,6 @@ if plot_velocity_field:
         # vmin = round(np.amin(v_map))
         # vmax = round(np.amax(v_map))
         level_boundaries = np.linspace(vmin, vmax, levels + 1)
-
-        plt.figure('Velocity Magnitude')
-        cmap = plt.get_cmap('jet')
-        plt.title('Velocity Magnitude')
-        cf = plt.contourf(X, Y, v_map, levels=levels, vmin=vmin, vmax=vmax, cmap=cmap)
-        clb = plt.colorbar(
-            ScalarMappable(norm=cf.norm, cmap=cf.cmap),
-            ticks=range(vmin, vmax+2, 2),
-            boundaries=level_boundaries,
-            values=(level_boundaries[:-1] + level_boundaries[1:]) / 2,)
-        clb.ax.set_title(r'$V$ (m/s)')
-        plt.plot(xp, yp, '-k', lw=2.)
-        plt.xlabel('x/c [-]')
-        plt.ylabel('y/c [-]')
 
     else:
 
@@ -652,28 +690,41 @@ if plot_velocity_field:
         # vmax = round(np.amax(v_map))
         level_boundaries = np.linspace(vmin, vmax, levels + 1)
 
-        plt.figure('Velocity Magnitude')
-        cmap = plt.get_cmap('jet')
-        plt.title('Velocity Magnitude')
-        cf = plt.contourf(X, Y, v_map, levels=levels, vmin=vmin, vmax=vmax, cmap=cmap)
-        clb = plt.colorbar(
-            ScalarMappable(norm=cf.norm, cmap=cf.cmap),
-            ticks=range(vmin, vmax + 2, 2),
-            boundaries=level_boundaries,
-            values=(level_boundaries[:-1] + level_boundaries[1:]) / 2, )
-        clb.ax.set_title(r'$V$ (m/s)')
-        plt.plot(xp, yp, '-k', lw=2.)
-        plt.xlabel('x/c [-]')
-        plt.ylabel('y/c [-]')
+    plt.figure('Velocity Magnitude')
+    cmap = plt.get_cmap('jet')
+    plt.title('Velocity Magnitude')
+    cf = plt.contourf(X, Y, v_map, levels=levels, vmin=vmin, vmax=vmax, cmap=cmap)
+    clb = plt.colorbar(
+        ScalarMappable(norm=cf.norm, cmap=cf.cmap),
+        ticks=range(vmin, vmax + 2, 2),
+        boundaries=level_boundaries,
+        values=(level_boundaries[:-1] + level_boundaries[1:]) / 2, )
+    clb.ax.set_title(r'$V$ (m/s)')
+    plt.plot(xp, yp, '-k', lw=2.)
+    plt.xlabel('x/c [-]')
+    plt.ylabel('y/c [-]')
 
 if plot_pressure_field:
 
-    levels = 400
-    vmin = -1
-    vmax = 1
-    # vmin = round(np.amin(cp_map))
-    # vmax = round(np.amax(cp_map))
-    level_boundaries = np.linspace(vmin, vmax, levels + 1)
+    if enable_pitching:
+
+        levels = 400
+        # men = np.mean(cp_map)
+        # rms = np.sqrt(np.mean((cp_map-men) ** 2))
+        # vmin = round(men - 3 * rms)
+        # vmax = round(men + 3 * rms)
+        vmin = -0.5
+        vmax = 0.5
+        level_boundaries = np.linspace(vmin, vmax, levels + 1)
+
+    else:
+
+        levels = 400
+        vmin = -1
+        vmax = 1
+        # vmin = round(np.amin(cp_map))
+        # vmax = round(np.amax(cp_map))
+        level_boundaries = np.linspace(vmin, vmax, levels + 1)
 
     plt.figure('Pressure Distribution')
     cmap = plt.get_cmap('jet')
@@ -681,7 +732,7 @@ if plot_pressure_field:
     cf2 = plt.contourf(X, Y, cp_map, levels=levels, vmin=vmin, vmax=vmax, cmap=cmap)
     clb = plt.colorbar(
         ScalarMappable(norm=cf2.norm, cmap=cf2.cmap),
-        ticks=range(vmin, vmax+1),
+        #ticks=range(vmin, vmax + 1),
         boundaries=level_boundaries,
         values=(level_boundaries[:-1] + level_boundaries[1:]) / 2, )
     clb.ax.set_title(r'$C_p$ (-)')
@@ -692,17 +743,13 @@ if plot_pressure_field:
 if plot_camber:
 
     # Calculate Y-coordinates according to naca4 airfoil
-    ycb4 = naca4(c, 0.04, 0.4, x)   # Calculate camber line for 4%
+    ycb = naca4(c, camber, 0.4, x)   # Calculate camber line for 4%
     yflat = np.copy(x) * 0.         # Flat plate
-
-    # Results needed for plotting
-    result_flat = steady_VP(yflat, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
-    result_c4 = steady_VP(ycb4, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
 
     plt.figure("Camber Lines")
     plt.title('Camber lines')
     plt.plot(x, yflat, '-ob', markevery=5, label='Flat plate')
-    plt.plot(x, ycb4, '-or', markevery=5, label='4% Camber')
+    plt.plot(x, ycb, '-or', markevery=5, label='4% Camber')
     plt.xlabel('x/c [-]')
     plt.ylabel('y/c [-]')
     plt.xticks(np.arange(min(x), max(x) + 0.1, 0.1))
@@ -710,15 +757,15 @@ if plot_camber:
     plt.grid('True')
     plt.legend()
 
-if plot_deltaP:
+if plot_deltaP_comp:
 
     # Calculate Y-coordinates according to naca4 airfoil
-    ycb4 = naca4(c, 0.04, 0.4, x)   # Calculate camber line for 4%
+    ycb = naca4(c, camber, 0.4, x)   # Calculate camber line for 4%
     yflat = np.copy(x) * 0.         # Flat plate
 
     # Results needed for plotting
     result_flat = steady_VP(yflat, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
-    result_c4 = steady_VP(ycb4, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+    result_c4 = steady_VP(ycb, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
 
     plt.figure("Pressure Difference")
     plt.title("Pressure Difference")
@@ -735,4 +782,3 @@ if plot_CLcirc:
 
 plt.show()
 print('\nDone.')
-exit(0)
