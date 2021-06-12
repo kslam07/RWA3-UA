@@ -205,6 +205,16 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma, u_kin, v_kin):
         rhs[i] = -np.array([v_norm[0] + u_kin[i], v_norm[1] + v_kin[i]]) @ ni[:, i]
     return a_mat, rhs
 
+
+def i2r(theta, x, y, x0, y0):
+
+    dcm = np.array([[np.cos(theta), np.sin(theta)], [-np.sin(theta), np.cos(theta)]]).T
+    pos_rot = np.vstack((x-x0, y-y0)).T
+    for i, pos in enumerate(pos_rot):
+        pos_rot[i] = dcm.T @ pos
+
+    return pos_rot
+
 def compute_pressure_and_loads(rhs, gamma_arr, tan_vec, l_panels, dt):
     """
     Computes the lift and drag based on the velocity components and circulation
@@ -379,8 +389,14 @@ def unsteady_VP(y, x, Npan, Npan_flap, theta_arr, dtheta_arr, a_flap, c, c_flap,
     gamma_vec = np.zeros(1)
     fix_gamma = np.zeros((len(trange), 1))
     wake_gamma = np.array([])
-    xwake = np.array([x[-1] + c/4])  # todo: placed 0.2 - 0.3 the distance covered by TE; how to determine?
-    ywake = np.array([0])
+
+    # wake in inertial frame
+    xp_wake = np.array([x[-1] - 0.25 * U_0 * dt])
+    yp_wake = np.array([0])
+
+    # wake in rotating frame
+    x_wake = xp_wake.copy()
+    y_wake = yp_wake.copy()
 
     # trailing edge position at previous iteration
     x_te_im1 = x[-1]
@@ -395,12 +411,12 @@ def unsteady_VP(y, x, Npan, Npan_flap, theta_arr, dtheta_arr, a_flap, c, c_flap,
 
         # update kinematics (movement of airfoil in inertial frame
         x_inertial = - U_0 * trange[t]  # horizontal freestream velocity
-        z_inertial = 0.0  # we don't have normal freestream velocity component
+        y_inertial = 0.0  # we don't have normal freestream velocity component
 
         # Transform relative to inertial ref. frame
         # alpha_arr[t] contains pitching oscillation of the airfoil, i.e. sin(omega t)
         xp = x * np.cos(theta_arr[t]) + y * np.sin(theta_arr[t]) + x_inertial
-        yp = -x * np.sin(theta_arr[t]) + y * np.cos(theta_arr[t]) + z_inertial
+        yp = -x * np.sin(theta_arr[t]) + y * np.cos(theta_arr[t]) + y_inertial
 
         print('   ...Solving linear system for circulation strengths.')
 
@@ -412,9 +428,11 @@ def unsteady_VP(y, x, Npan, Npan_flap, theta_arr, dtheta_arr, a_flap, c, c_flap,
         u_kin = np.cos(theta_arr[t]) * U_0 - dtheta_arr[t] * dc  # flat plate so xcp == eta
         v_kin = np.sin(theta_arr[t]) * U_0 + dtheta_arr[t] * xcp  # shape of the airfoil is contant (rigid body)
 
+        # convert trailing vortex from inertial to relative/rotating
+        pos_wake = i2r(theta_arr[t], xp_wake, yp_wake, x_inertial, y_inertial)
+
         # Calculate last column influence matrix (influence of trailing edge vortex wake)
-        # todo: use (x,y) of wake not (X, Y)!
-        aij_mat, rhs = aijmatrix2(aij_mat, xcp, ycp, xwake, ywake, ni, wake_gamma, u_kin, v_kin)   # aij matrix
+        aij_mat, rhs = aijmatrix2(aij_mat, xcp, ycp, pos_wake[:, 0], pos_wake[:, 1], ni, wake_gamma, u_kin, v_kin)
 
         # add RHS contribution to Kelvin condition
         rhs[-1] = f_gamma  # circulation of airfoil at previous timestep
@@ -434,12 +452,11 @@ def unsteady_VP(y, x, Npan, Npan_flap, theta_arr, dtheta_arr, a_flap, c, c_flap,
         # dcpj = dpj/(0.5 * rho * (U_0**2))       # Pressure coefficient difference between upper and lower surface
 
         # compute wake sheet roll-up in RELATIVE frame
-        # todo: convert (X, Y) wake to (x,y) wake
-        xwake, ywake = roll_vortex_wake(xc4, yc4, gamma_vec, xwake, ywake, wake_gamma, dt)
+        x_wake, y_wake = roll_vortex_wake(xc4, yc4, gamma_vec, pos_wake[:, 0], pos_wake[:, 1], wake_gamma, dt)
 
         # todo: add new trailing wake vortex at 0.2-0.3 of the distance covered by the trailing edge
-        xwake = np.append(xwake, 0.25 * (xp[-1] - x_te_im1))
-        ywake = np.append(ywake, 0.25 * (yp[-1] - y_te_im1))
+        x_wake = np.append(x_wake, 0.25 * (xp[-1] - x_te_im1))
+        y_wake = np.append(y_wake, 0.25 * (yp[-1] - y_te_im1))
 
         # update parameters
         x_te_im1 = xp[-1]
