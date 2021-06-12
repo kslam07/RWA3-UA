@@ -219,6 +219,35 @@ def compute_pressure_and_loads(rhs, gamma_arr, tan_vec, l_panels, dt):
 
     raise NotImplementedError
 
+@nb.njit()
+def compute_velocity_field(u_inf, x_mesh, y_mesh, x_vorts, y_vorts, gamma_b, gamma_w, x_wake, y_wake):
+    # Build velocity and pressure distribution
+    u = np.ones((len(x_mesh[:, 0]), len(y_mesh[0, :]))) * u_inf
+    v = np.zeros((len(x_mesh[:, 0]), len(y_mesh[0, :])))
+    v_map = np.zeros((len(x_mesh[:, 0]), len(y_mesh[0, :])))
+    cp_map = np.zeros((len(x_mesh[:, 0]), len(y_mesh[0, :])))
+
+    print('...Creating velocity and pressure distribution.\n')
+
+    for i in range(len(x_mesh[:, 0])):
+
+        print('   ...Row:', i + 1)
+
+        for j in range(len(y_mesh[0, :])):
+
+            for g in range(len(gamma_b) - 1):
+                uv = lumpvor2d(X[i, j], Y[i, j], xx[g], yy[g], gamma_b[g])
+                u[i, j] = u[i, j] + uv[0]
+                v[i, j] = v[i, j] + uv[1]
+
+            for g in range(len(gamma_w)):
+                uv = lumpvor2d(x_mesh[i, j], y_mesh[i, j], x_wake[g + 1], y_wake[g + 1], gamma_w[g])
+                u[i, j] = u[i, j] + uv[0]
+                v[i, j] = v[i, j] + uv[1]
+
+            v_map[i, j] = np.sqrt(u[i, j] ** 2 + v[i, j] ** 2)
+            cp_map[i, j] = 1 - (v_map[i, j] / u_inf) ** 2
+    return v_map, cp_map
 @nb.njit
 def roll_vortex_wake(x_vor, y_vor, gamma_airfoil, x_wake, y_wake, gamma_wake, dt):
     """
@@ -347,7 +376,6 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
     # Calculate dx,dy,dc component per panel (dc = panel length)
     dx = np.delete(np.roll(x, -1) - x, -1)
     dy = np.delete(np.roll(y, -1) - y, -1)
-    dc = np.sqrt(dx ** 2 + dy ** 2)
 
     # Further induced geometry calculations
     alpha_i = np.arctan2(dy, dx)  # Induced AoA by panel slope
@@ -375,8 +403,6 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
     # Storage arrays for all time steps
     xp_arr = np.zeros((Npan + 1, len(trange)))
     yp_arr = np.zeros((Npan + 1, len(trange)))
-    v_map_arr = np.zeros((len(X[:, 1]), len(Y[1, :]), len(trange)))
-    cp_map_arr = np.zeros((len(X[:, 1]), len(Y[1, :]), len(trange)))
     gamma_arr = np.zeros((1, len(trange)))
 
     print('   ...Start time loop.\n')
@@ -449,7 +475,6 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         ywake_new = yp[-1] + 0.25 * (ywake[t] - yp[-1])
         xwake = np.append(xwake, xwake_new)
         ywake = np.append(ywake, ywake_new)
-        # todo: add new trailing wake vortex at 0.2-0.3 of the distance covered by the trailing edge
 
 
     return xc4, yc4, xp, yp, gamma_vec, wake_gamma, xwake, ywake
@@ -503,35 +528,7 @@ if plot_velocity_field or plot_pressure_field:
         xwake = result[6]
         ywake = result[7]
 
-        # Build velocity and pressure distribution
-        u = np.ones((len(X[:, 0]), len(Y[0, :]))) * U_0
-        v = np.zeros((len(X[:, 0]), len(Y[0, :])))
-        v_map = np.zeros((len(X[:, 0]), len(Y[0, :])))
-        cp_map = np.zeros((len(X[:, 0]), len(Y[0, :])))
-
-        print('...Creating velocity and pressure distribution.\n')
-
-        for i in range(len(X[:, 0])):
-
-            print('   ...Row:', i + 1)
-
-            for j in range(len(Y[0, :])):
-
-                for g in range(len(gammaB) - 1):
-
-                    uv = indvel(gammaB[g], X[i, j], Y[i, j], xx[g], yy[g])
-                    u[i, j] = u[i, j] + uv[0]
-                    v[i, j] = v[i, j] + uv[1]
-
-                for g in range(len(gammaW)):
-
-                    uv = indvel(gammaW[g], X[i, j], Y[i, j], xwake[g+1], ywake[g+1])
-                    u[i, j] = u[i, j] + uv[0]
-                    v[i, j] = v[i, j] + uv[1]
-
-                v_map[i, j] = np.sqrt(u[i, j] ** 2 + v[i, j] ** 2)
-                cp_map[i, j] = 1 - (v_map[i, j] / U_0) ** 2
-
+        v_map, cp_map = compute_velocity_field(U_0, X, Y, xp, yp, gammaB, gammaW, xwake, ywake)
     else:
 
         result = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(15), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
@@ -604,8 +601,8 @@ if plot_velocity_field:
         levels = 400
         men = np.mean(v_map)
         rms = np.sqrt(np.mean((v_map-men) ** 2))
-        vmin = round(men - 3 * rms)
-        vmax = round(men + 3 * rms)
+        vmin = int(round(men - 3 * rms))
+        vmax = int(round(men + 3 * rms))
         # vmin = round(np.amin(v_map))
         # vmax = round(np.amax(v_map))
         level_boundaries = np.linspace(vmin, vmax, levels + 1)
