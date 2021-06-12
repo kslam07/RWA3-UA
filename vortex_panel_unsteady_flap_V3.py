@@ -18,6 +18,7 @@ print('...Setting flags based on user input.')
 enable_cos_dist     = True
 enable_flap         = False
 enable_pitching     = True
+enable_gust         = True
 add_meshrefinement  = False
 apply_camber        = False
 visualize_wake      = True
@@ -52,7 +53,7 @@ yres = 50               # Grid discretization in y direction
 
 # Operations
 rho = 1.225             # (kg/m^3) free-stream density
-U_0 = 10                # (m/s) free-stream velocity
+U_0 = 10                # (m/s) free-stream velocity in x
 k = 0.1                 # (Hz) Reduced frequency: 0.02, 0.05, 0.1
 omega = k*2*U_0/c       # (Hz) Frequency of the unsteadiness
 amp = np.deg2rad(15)    # (deg) Amplitude of the pitching motion
@@ -345,7 +346,7 @@ def steady_VP(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho, key):
 
     # Further induced geometry calculations
     alpha_i = np.arctan2(dy, dx)                            # Induced AoA by panel slope
-    ni = np.array([np.sin(-alpha_i), np.cos(-alpha_i)])    # Normal vector; First index = x, second index = y
+    ni = np.array([np.sin(-alpha_i), np.cos(-alpha_i)])     # Normal vector; First index = x, second index = y
 
     # Calculate x,y coordinates of the quarter cord (c4) and collocation points (cp)
     xc4 = xp[0:-1] + dx/4
@@ -356,9 +357,9 @@ def steady_VP(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho, key):
 
     print('   ...Solving linear system for circulation strengths.')
 
-    # Solve system #
-    aij_mat = aijmatrix(xcp, ycp, xc4, yc4, Npan, ni)   # aij matrix
-    RHS = U_0 * np.sin(alpha_i) * np.ones(Npan)  # RHS vector
+    # Solve system
+    aij_mat = aijmatrix(xcp, ycp, xc4, yc4, Npan, ni)   # Influence matrix
+    RHS = U_0 * np.sin(alpha_i) * np.ones(Npan)         # RHS vector
 
     gammamatrix = np.linalg.solve(aij_mat, RHS)         # Find circulation of each vortex point
 
@@ -375,7 +376,7 @@ def steady_VP(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho, key):
     return xc4, yc4, dcpj, Cl, gammamatrix, xp, yp
 
 
-def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap, U_0, rho):
+def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap, U_0, V_0, rho):
 
     print('   ...Initialize influence matrix.')
 
@@ -416,7 +417,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
     ycp = y[0:-1] + dy * (3 / 4)
 
     # Solve system
-    aij_mat = aijmatrix(xcp, ycp, xc4, yc4, Npan, ni)  # aij matrix
+    aij_mat = aijmatrix(xcp, ycp, xc4, yc4, Npan, ni)  # influence matrix
     # add additional column THEN add new row to account for shed vortex
     aij_mat = np.vstack((np.hstack((aij_mat, np.zeros((Npan, 1)))), np.ones((1, Npan + 1))))
 
@@ -439,6 +440,15 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         print(f"   Time step: {t+1}/{len(trange)-1}")
         print('   ...Creating geometry.')
 
+        if enable_gust and trange[t] >= gstart and trange[t] <= gstop:
+
+            V_0 = 3     # (m/s) free-stream velocity in y
+
+        else:
+
+            V_0 = 0     # (m/s) free-stream velocity in y
+
+
         xp = x * np.cos(alpha_arr[t]) + y * np.sin(alpha_arr[t])
         yp = -x * np.sin(alpha_arr[t]) + y * np.cos(alpha_arr[t])
 
@@ -452,8 +462,8 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 
         # Further induced geometry calculations
         alpha_i = np.arctan2(dy, dx)  # Induced AoA by panel slope
-        ni = np.array([np.sin(-alpha_i), np.cos(-alpha_i)])  # Normal vector; First index = x, second index = y
-        ti = np.array([np.cos(alpha_i), -np.sin(alpha_i)])  # Tan. vector; first index = x, second index = y
+        ni = np.array([np.sin(-alpha_i), np.cos(-alpha_i)])     # Normal vector; First index = x, second index = y
+        ti = np.array([np.cos(alpha_i), -np.sin(alpha_i)])      # Tan. vector; first index = x, second index = y
 
         # Calculate x,y coordinates of the quarter cord (c4) and collocation points (cp)
         xc4 = xp[0:-1] + dx/4
@@ -469,12 +479,13 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         fix_gamma[t] = f_gamma
 
         # Calculate last column influence matrix (influence of trailing edge vortex wake)
-        aij_mat, v_norm = aijmatrix2(aij_mat, xcp, ycp, xwake, ywake, ni, wake_gamma)   # aij matrix
+        aij_mat, v_norm = aijmatrix2(aij_mat, xcp, ycp, xwake, ywake, ni, wake_gamma)
 
-        # Non-circulatory
-        RHS = U_0 * np.sin(alpha_arr[t]) * np.ones(Npan+1)
+        # Steady-state RHS
+        RHS_ss = U_0 * np.sin(alpha_arr[t]) * np.ones(Npan)
+        gamma_ss_vec = -(np.linalg.inv(aij_mat[:-1, :-1]) @ RHS_ss)
 
-        # Pitching RHS | should be the same as eqn 13.116
+        # Pitching RHS | eqn 13.116
         xcp = xcp.reshape([Npan, 1])
         ycp = ycp.reshape([Npan, 1])
         a = np.concatenate((xcp, ycp, np.zeros((Npan, 1))), axis=1)
@@ -486,10 +497,11 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 
         # directly solve system and obtain new circulation over airfoil and trailing edge vortex wake
         gamma_vec = -(np.linalg.inv(aij_mat) @ RHS)
-        wake_gamma = np.append(wake_gamma, gamma_vec[-1])  # log circulation of wake
-        gamma_arr[t + 1] = gamma_vec[:-1]  # log circulation of each panel
+        wake_gamma = np.append(wake_gamma, gamma_vec[-1])   # log circulation of wake
+        # todo: why are we doing this?
+        gamma_arr[t + 1] = gamma_vec[:-1]                   # log circulation of each panel
 
-        print('   ...Calculating lift and pressure.\n')
+        print('   ...Computing wake sheet roll-up.')
 
         # compute wake sheet roll-up
         xwake, ywake = roll_vortex_wake(xc4, yc4, gamma_vec, xwake, ywake, wake_gamma, dt)
@@ -500,10 +512,9 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         xwake = np.append(xwake, xwake_new)
         ywake = np.append(ywake, ywake_new)
 
+        print('   ...Calculating lift and pressure.\n')
         # Secondary computations
-        # todo: add gust if you want to implement it
-        # TODO: ARTHUR ADD STEADY-STATE COMPUTATION and replace gamma_steady with the gamma from that system!!!
-        compute_pressure_and_loads(U_0, 0.0, dc, gamma_arr[t+1], gamma_arr[t], alpha_arr[t], gamma_steady=1.0)
+        compute_pressure_and_loads(U_0, 0.0, dc, gamma_arr[t+1], gamma_arr[t], alpha_arr[t], gamma_steady=gamma_ss_vec)
 
     return xc4, yc4, xp, yp, gamma_vec, wake_gamma, xwake, ywake
 
@@ -539,6 +550,11 @@ if enable_pitching:
     alpha_arr = amp * np.sin(omega * trange)            # AoA log
     dalpha_arr = amp * omega * np.cos(omega * trange)   # Derivative of AoA log
 
+if enable_gust:
+
+    gstart = stop/5
+    gstop = stop/5 + (len(trange)/5)*dt
+
 if plot_ss_cl_curve:
 
     print('...Building lift curve.')
@@ -565,7 +581,7 @@ if plot_velocity_field or plot_pressure_field:
 
     if enable_pitching:
 
-        result = unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, np.deg2rad(a_flap), c, c_flap, U_0, rho)
+        result = unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, np.deg2rad(a_flap), c, c_flap, U_0, V_0, rho)
 
         xx = result[0]
         yy = result[1]
@@ -577,6 +593,7 @@ if plot_velocity_field or plot_pressure_field:
         ywake = result[7]
 
         v_map, cp_map = compute_velocity_field(U_0, X, Y, xp, yp, gammaB, gammaW, xwake, ywake)
+
     else:
 
         result = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(15), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
