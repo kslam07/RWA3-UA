@@ -4,7 +4,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.cm import ScalarMappable
-import numba as nb  # trying out write unvectorized code with Numba jitting
+import numba as nb
 import warnings
 warnings.simplefilter('ignore', category=nb.errors.NumbaPerformanceWarning)
 
@@ -24,7 +24,7 @@ visualize_wake      = True
 
 plot_backmesh       = False
 plot_camber         = False
-plot_cl_curve       = False
+plot_ss_cl_curve    = False
 plot_velocity_field = True
 plot_pressure_field = False
 plot_CLcirc         = False
@@ -98,7 +98,7 @@ else:
 
 def naca4(c, m, p, x):  # Calculate corresponding Y components of camber line for naca 4series
 
-    # c = hord length,m = max camber, p = max camber postion, x are x coordinates
+    # c = chord length, m = max camber, p = max camber position, x are x coordinates
 
     print('...Building NACA 4series camber line.')
 
@@ -242,6 +242,7 @@ def compute_pressure_and_loads(u_inf, v_inf, dc, gamma_vec, gamma_vec_old, theta
 
     return delta_p, cl_per_sec, cl_per_sec_ss, cl, cl_ss
 
+
 @nb.njit()
 def compute_velocity_field(u_inf, x_mesh, y_mesh, x_vorts, y_vorts, gamma_b, gamma_w, x_wake, y_wake):
     # Build velocity and pressure distribution
@@ -271,6 +272,8 @@ def compute_velocity_field(u_inf, x_mesh, y_mesh, x_vorts, y_vorts, gamma_b, gam
             v_map[i, j] = np.sqrt(u[i, j] ** 2 + v[i, j] ** 2)
             cp_map[i, j] = 1 - (v_map[i, j] / u_inf) ** 2
     return v_map, cp_map
+
+
 @nb.njit
 def roll_vortex_wake(x_vor, y_vor, gamma_airfoil, x_wake, y_wake, gamma_wake, dt):
     """
@@ -536,7 +539,7 @@ if enable_pitching:
     alpha_arr = amp * np.sin(omega * trange)            # AoA log
     dalpha_arr = amp * omega * np.cos(omega * trange)   # Derivative of AoA log
 
-if plot_cl_curve:
+if plot_ss_cl_curve:
 
     print('...Building lift curve.')
     print('...Running solver.\n')
@@ -544,18 +547,11 @@ if plot_cl_curve:
     alpha_range = np.arange(-4, 15)  # Range of AoA
     cl_arr = np.zeros(len(alpha_range))  # Lift coefficient log
 
-    if enable_pitching:
+    for i, alpha in enumerate(alpha_range):
 
-        placeholder = 1
-        # todo: implement circulatory cl
-
-    else:
-
-        for i, alpha in enumerate(alpha_range):
-
-            print(f"   Alpha: {alpha} deg")
-            temp = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(alpha), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
-            cl_arr[i] = temp[3]
+        print(f"   Alpha: {alpha} deg")
+        temp = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(alpha), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+        cl_arr[i] = temp[3]
 
 if plot_velocity_field or plot_pressure_field:
 
@@ -655,7 +651,7 @@ if plot_backmesh:
     plt.xlabel('x/c [-]')
     plt.ylabel('y/c [-]')
 
-if plot_cl_curve:
+if plot_ss_cl_curve:
 
     plt.figure("CL")
     plt.title(r'$C_l$-$\alpha$ curve')
