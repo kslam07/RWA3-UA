@@ -21,15 +21,15 @@ enable_pitching     = True
 enable_gust         = True
 add_meshrefinement  = False
 apply_camber        = False
-visualize_wake      = False
+visualize_wake      = True
 
 plot_backmesh       = True
 plot_camber         = False
 plot_ss_cl_curve    = False
-plot_velocity_field = False
-plot_pressure_field = False
+plot_velocity_field = True
+plot_pressure_field = True
 plot_CLcirc         = False
-plot_deltaP_comp    = True
+plot_deltaP_comp    = False
 
 # ---------------------------------- #
 # Geometry and operations parameters
@@ -65,6 +65,8 @@ start = 0                                   # Start time
 stop = 10                                   # Stop time
 dt = 0.1                                    # Time step
 trange = np.arange(start, stop + dt, dt)    # Time log
+gstart = stop/5                             # Start gust (if active)
+gstop = stop/5 + 2*(len(trange)/5)*dt       # Stop gust (if active)
 
 # ---------------------------------- #
 # Create Grid
@@ -214,7 +216,7 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
     return a_mat, v_norm
 
 
-def compute_pressure_and_loads(u_inf, v_inf, dc, gamma_vec, gamma_vec_old, theta, gamma_steady=1, rho=1.225):
+def compute_pressure_and_loads(u_inf, v_inf, dc, gamma_vec, gamma_vec_old, theta, gamma_steady, rho):
     """
     Computes the lift and drag based on the velocity components and circulation
 
@@ -446,11 +448,14 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 
         if enable_gust and gstart <= trange[t] <= gstop:
 
+            print('   ...Gust active')
             V_0 = 3     # (m/s) free-stream velocity in y
 
         else:
 
             V_0 = 0     # (m/s) free-stream velocity in y
+
+        galpha = np.arctan2(V_0, U_0)
 
         xp = x * np.cos(alpha_arr[t]) + y * np.sin(alpha_arr[t])
         yp = -x * np.sin(alpha_arr[t]) + y * np.cos(alpha_arr[t])
@@ -485,7 +490,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         aij_mat, v_norm = aijmatrix2(aij_mat, xcp, ycp, xwake, ywake, ni, wake_gamma)
 
         # Steady-state RHS
-        RHS_ss = U_0 * np.sin(alpha_arr[t]) * np.ones(Npan)
+        RHS_ss = U_0 * np.sin(alpha_arr[t]) * np.ones(Npan) + V_0 * np.cos(alpha_arr[t]) * np.ones(Npan)
         gamma_ss_vec = -(np.linalg.inv(aij_mat[:-1, :-1]) @ RHS_ss)
 
         # Pitching RHS | eqn 13.116
@@ -495,7 +500,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         b = np.concatenate((np.zeros((Npan, 2)), np.ones((Npan, 1)) * dalpha_arr[t]), axis=1)
         v_pitch = np.cross(-a, b)
         v_pitch_n = np.concatenate(((v_pitch[:, :2]*np.asarray(ni).T).sum(axis=1), [0]), axis=0)
-        RHS = U_0 * np.sin(alpha_arr[t]) * np.ones(Npan + 1) + v_norm + v_pitch_n
+        RHS = U_0 * np.sin(alpha_arr[t]) * np.ones(Npan + 1) + V_0 * np.cos(alpha_arr[t]) * np.ones(Npan + 1) + v_norm + v_pitch_n
         RHS[-1] = -f_gamma
 
         # directly solve system and obtain new circulation over airfoil and trailing edge vortex wake
@@ -517,7 +522,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 
         print('   ...Calculating lift and pressure.\n')
         # Secondary computations
-        compute_pressure_and_loads(U_0, 0.0, dc, gamma_arr[t+1], gamma_arr[t], alpha_arr[t], gamma_steady=gamma_ss_vec)
+        compute_pressure_and_loads(U_0, V_0, dc, gamma_arr[t+1], gamma_arr[t], alpha_arr[t], gamma_ss_vec, rho)
 
     return xc4, yc4, xp, yp, gamma_vec, wake_gamma, xwake, ywake
 
@@ -552,11 +557,6 @@ if enable_pitching:
 
     alpha_arr = amp * np.sin(omega * trange)            # AoA log
     dalpha_arr = amp * omega * np.cos(omega * trange)   # Derivative of AoA log
-
-if enable_gust:
-
-    gstart = stop/5
-    gstop = stop/5 + (len(trange)/5)*dt
 
 if plot_ss_cl_curve:
 
