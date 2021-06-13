@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.cm import ScalarMappable
 import numba as nb
 import warnings
-from post_process import plot_circulatory_loads
+from post_process import plot_circulatory_loads, compute_velocity_field_us, compute_velocity_field_ss
 
 warnings.simplefilter('ignore', category=nb.errors.NumbaPerformanceWarning)
 
@@ -129,6 +129,7 @@ def indvel(gammaj, x, y, xj, yj):  # Formula 11.1
 
     return uv
 
+
 @nb.njit
 def lumpvor2d(xcol, zcol, xvor, zvor, circvor=1):
     """
@@ -153,7 +154,7 @@ def lumpvor2d(xcol, zcol, xvor, zvor, circvor=1):
     # magnitude of the distance between two points
     r_vortex_sq = (xcol - xvor) ** 2 + (zcol - zvor) ** 2
 
-    if r_vortex_sq < 1e-8:  # some arbitrary threshold
+    if r_vortex_sq < 1e-9:  # some arbitrary threshold
         return np.array([0.0, 0.0])
 
     # the distance in x, and z between two points
@@ -252,37 +253,6 @@ def compute_pressure_and_loads(u_inf, v_inf, dc, gamma_vec, gamma_vec_old, theta
     cl_ss = np.sum(cl_per_sec_ss * dc)  # weighted average of the panel lengths
 
     return delta_p, cl, cl_ss
-
-
-@nb.njit()
-def compute_velocity_field(u_inf, x_mesh, y_mesh, x_vorts, y_vorts, gamma_b, gamma_w, x_wake, y_wake):
-    # Build velocity and pressure distribution
-    u = np.ones((len(x_mesh[:, 0]), len(y_mesh[0, :]))) * u_inf
-    v = np.zeros((len(x_mesh[:, 0]), len(y_mesh[0, :])))
-    v_map = np.zeros((len(x_mesh[:, 0]), len(y_mesh[0, :])))
-    cp_map = np.zeros((len(x_mesh[:, 0]), len(y_mesh[0, :])))
-
-    print('...Creating velocity and pressure distribution.\n')
-
-    for i in range(len(x_mesh[:, 0])):
-
-        print('   ...Row:', i + 1)
-
-        for j in range(len(y_mesh[0, :])):
-
-            for g in range(len(gamma_b) - 1):
-                uv = lumpvor2d(X[i, j], Y[i, j], xx[g], yy[g], gamma_b[g])
-                u[i, j] = u[i, j] + uv[0]
-                v[i, j] = v[i, j] + uv[1]
-
-            for g in range(len(gamma_w)):
-                uv = lumpvor2d(x_mesh[i, j], y_mesh[i, j], x_wake[g + 1], y_wake[g + 1], gamma_w[g])
-                u[i, j] = u[i, j] + uv[0]
-                v[i, j] = v[i, j] + uv[1]
-
-            v_map[i, j] = np.sqrt(u[i, j] ** 2 + v[i, j] ** 2)
-            cp_map[i, j] = 1 - (v_map[i, j] / u_inf) ** 2
-    return v_map, cp_map
 
 
 @nb.njit
@@ -608,7 +578,7 @@ if plot_velocity_field or plot_pressure_field:
         xwake = result[6]
         ywake = result[7]
 
-        v_map, cp_map = compute_velocity_field(U_0, X, Y, xp, yp, gammaB, gammaW, xwake, ywake)
+        v_map, cp_map = compute_velocity_field_ss(U_0, X, Y, xp, yp, gammaB, gammaW, xwake, ywake)
 
     else:
 
@@ -623,21 +593,7 @@ if plot_velocity_field or plot_pressure_field:
         print('...Creating velocity and pressure distribution.\n')
 
         # Build velocity and pressure distribution over background mesh
-        for i in range(len(X[:, 0])):
-
-            print('   ...Row:', i+1)
-
-            for j in range(len(Y[0, :])):
-
-                for g, gamma in enumerate(gammaM):
-
-                    uv = indvel(gamma, X[i, j], Y[i, j], xx[g], yy[g])
-                    u[i, j] = u[i, j] + uv[0]
-                    v[i, j] = v[i, j] + uv[1]
-
-                v_map[i, j] = np.sqrt(u[i, j]**2 + v[i, j]**2)
-                cp_map[i, j] = 1 - (v_map[i, j]/U_0)**2
-
+        v_map, cp_map = compute_velocity_field_ss(U_0, X, Y, xx, yy, gammaM)
     print('')
 
 # ---------------------------------- #

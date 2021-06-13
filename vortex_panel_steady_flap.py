@@ -1,5 +1,6 @@
 
 ## VORTEX PANEL METHOD
+from post_process import compute_velocity_field_ss
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -138,33 +139,6 @@ def aijmatrix(xcols, ycols, xvorts, yvorts, Npan, ni):  # Calculation of the inf
     return a_mat
 
 
-
-@nb.njit()
-def compute_velocity_field(u_inf, x_mesh, y_mesh, x_vorts, y_vorts, gamma):
-    # Build velocity and pressure distribution
-    u = np.ones((len(x_mesh[:, 0]), len(y_mesh[0, :]))) * u_inf
-    v = np.zeros((len(x_mesh[:, 0]), len(y_mesh[0, :])))
-    v_map = np.zeros((len(x_mesh[:, 0]), len(y_mesh[0, :])))
-    cp_map = np.zeros((len(x_mesh[:, 0]), len(y_mesh[0, :])))
-
-    print('...Creating velocity and pressure distribution.\n')
-
-    for i in range(len(x_mesh[:, 0])):
-
-        print('   ...Row:', i + 1)
-
-        for j in range(len(y_mesh[0, :])):
-
-            for g in range(len(gamma)):
-                uv = lumpvor2d(X[i, j], Y[i, j], xx[g], yy[g], gamma[g])
-                u[i, j] = u[i, j] + uv[0]
-                v[i, j] = v[i, j] + uv[1]
-
-            v_map[i, j] = np.sqrt(u[i, j] ** 2 + v[i, j] ** 2)
-            cp_map[i, j] = 1 - (v_map[i, j] / u_inf) ** 2
-    return v_map, cp_map
-
-
 def calculation(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho):
 
     print('   ...Creating geometry.')
@@ -259,7 +233,7 @@ if plot_velocity_field or plot_pressure_field:
     yp = result[6]
 
     print('...Creating velocity and pressure distribution.\n')
-    v_map, cp_map = compute_velocity_field(U_0, X, Y, xx, yy, gammaM)
+    v_map, cp_map = compute_velocity_field_ss(U_0, X, Y, xx, yy, gammaM)
     print('')
 
 # ---------------------------------- #
