@@ -578,7 +578,7 @@ if plot_velocity_field or plot_pressure_field:
         xwake = result[6]
         ywake = result[7]
 
-        v_map, cp_map = compute_velocity_field_ss(U_0, X, Y, xp, yp, gammaB, gammaW, xwake, ywake)
+        v_map, cp_map = compute_velocity_field_us(U_0, X, Y, xp, yp, gammaB, gammaW, xwake, ywake)
 
     else:
 
