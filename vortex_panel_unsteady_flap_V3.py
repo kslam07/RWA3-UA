@@ -220,7 +220,7 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
     return a_mat, v_norm
 
 
-def compute_pressure_and_loads(u_inf, v_inf, dc, gamma_vec, gamma_vec_old, theta, gamma_steady, rho=1.225):
+def compute_pressure_and_loads(u_inf, v_inf, dc, dt, gamma_vec, gamma_vec_old, theta, gamma_steady, rho=1.225):
     """
     Computes the lift and drag based on the velocity components and circulation
 
@@ -242,7 +242,7 @@ def compute_pressure_and_loads(u_inf, v_inf, dc, gamma_vec, gamma_vec_old, theta
     gamma_k = np.cumsum(gamma_vec)
 
     # pressure difference
-    delta_p = rho * (v_eff * gamma_vec / dc) + (gamma_k - gamma_k_old) / dc
+    delta_p = rho * (v_eff * gamma_vec / dc) + (gamma_k - gamma_k_old) / dt
 
     # lift coefficient per panel and airfoil lift coefficient
     cl_per_sec = delta_p / (0.5 * rho * v_eff**2)
@@ -488,7 +488,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         print('   ...Computing wake sheet roll-up.')
 
         # compute wake sheet roll-up
-        xwake, ywake = roll_vortex_wake(xc4, yc4, gamma_vec, xwake, ywake, wake_gamma, dt)
+        # xwake, ywake = roll_vortex_wake(xc4, yc4, gamma_vec, xwake, ywake, wake_gamma, dt)
 
         xwake = xwake + U_0*dt
         xwake_new = xp[-1] + 0.25 * (xwake[t] - xp[-1])
@@ -498,7 +498,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 
         print('   ...Calculating lift and pressure.\n')
         # Secondary computations
-        delta_p, cl, cl_ss = compute_pressure_and_loads(U_0, V_0, dc, gamma_arr[t+1], gamma_arr[t], alpha_arr[t],
+        delta_p, cl, cl_ss = compute_pressure_and_loads(U_0, V_0, dc, dt, gamma_arr[t+1], gamma_arr[t], alpha_arr[t],
                                                         gamma_ss_vec, rho)
         # log pressure and loads
         cl_unsteady_arr[t] = cl
