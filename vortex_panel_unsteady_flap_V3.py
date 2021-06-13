@@ -56,7 +56,7 @@ yres = 50               # Grid discretization in y direction
 # Operations
 rho = 1.225                         # (kg/m^3) free-stream density
 U_0 = 10                            # (m/s) free-stream velocity in x
-AoA = 12                            # Angle of attack (for specific alpha cases)
+AoA = 15                            # Angle of attack (for specific alpha cases)
 alpha_range = np.arange(-4, 15)     # Range of AoA for cl curves
 k = 0.1                             # (Hz) Reduced frequency: 0.02, 0.05, 0.1
 omega = k*2*U_0/c                   # (Hz) Frequency of the unsteadiness
@@ -67,6 +67,9 @@ start = 0                                   # Start time
 stop = 10                                   # Stop time
 dt = 0.1                                    # Time step
 trange = np.arange(start, stop + dt, dt)    # Time log
+alpha_arr = np.zeros(len(trange))
+gstart = stop/5                             # Start gust (if active)
+gstop = stop/5 + 2*(len(trange)/5)*dt       # Stop gust (if active)
 
 # ---------------------------------- #
 # Create Grid
@@ -216,7 +219,7 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
     return a_mat, v_norm
 
 
-def compute_pressure_and_loads(u_inf, v_inf, dc, gamma_vec, gamma_vec_old, theta, gamma_steady=1, rho=1.225):
+def compute_pressure_and_loads(u_inf, v_inf, dc, gamma_vec, gamma_vec_old, theta, gamma_steady, rho=1.225):
     """
     Computes the lift and drag based on the velocity components and circulation
 
@@ -452,11 +455,14 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 
         if enable_gust and gstart <= trange[t] <= gstop:
 
+            print('   ...Gust active')
             V_0 = 3     # (m/s) free-stream velocity in y
 
         else:
 
             V_0 = 0     # (m/s) free-stream velocity in y
+
+        galpha = np.arctan2(V_0, U_0)
 
         xp = x * np.cos(alpha_arr[t]) + y * np.sin(alpha_arr[t])
         yp = -x * np.sin(alpha_arr[t]) + y * np.cos(alpha_arr[t])
@@ -501,7 +507,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         b = np.concatenate((np.zeros((Npan, 2)), np.ones((Npan, 1)) * dalpha_arr[t]), axis=1)
         v_pitch = np.cross(-a, b)
         v_pitch_n = np.concatenate(((v_pitch[:, :2]*np.asarray(ni).T).sum(axis=1), [0]), axis=0)
-        RHS = U_0 * np.sin(alpha_arr[t]) * np.ones(Npan + 1) + v_norm + v_pitch_n
+        RHS = U_0 * np.sin(alpha_arr[t]) * np.ones(Npan + 1) + V_0 * np.cos(alpha_arr[t]) * np.ones(Npan + 1) + v_norm + v_pitch_n
         RHS[-1] = -f_gamma
 
         # directly solve system and obtain new circulation over airfoil and trailing edge vortex wake
@@ -523,7 +529,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         print('   ...Calculating lift and pressure.\n')
         # Secondary computations
         delta_p, cl, cl_ss = compute_pressure_and_loads(U_0, V_0, dc, gamma_arr[t+1], gamma_arr[t], alpha_arr[t],
-                                                        gamma_ss_vec)
+                                                        gamma_ss_vec, rho)
         # log pressure and loads
         cl_unsteady_arr[t] = cl
         cl_steady_arr[t] = cl_ss
@@ -565,11 +571,6 @@ if enable_pitching:
 
     alpha_arr = amp * np.sin(omega * trange)            # AoA log
     dalpha_arr = amp * omega * np.cos(omega * trange)   # Derivative of AoA log
-
-if enable_gust:
-    alpha_arr = np.zeros(len(trange))
-    gstart = stop/5
-    gstop = stop/5 + (len(trange)/5)*dt
 
 if plot_ss_cl_curve:
 
@@ -673,7 +674,7 @@ if plot_velocity_field:
 
     if enable_pitching:
 
-        levels = 1000
+        levels = 400
         men = np.mean(v_map)
         rms = np.sqrt(np.mean((v_map-men) ** 2))
         vmin = int(round(men - 3 * rms))
@@ -686,20 +687,22 @@ if plot_velocity_field:
 
         levels = 400
         men = np.mean(v_map)
-        rms = np.sqrt(np.mean(v_map ** 2))
+        rms = np.sqrt(np.mean((v_map) ** 2))
         vmin = round(men - 0.5 * rms)
         vmax = round(men + 0.5 * rms)
         # vmin = round(np.amin(v_map))
         # vmax = round(np.amax(v_map))
         level_boundaries = np.linspace(vmin, vmax, levels + 1)
 
+    v_map[v_map > vmax] = vmax
+    v_map[v_map < vmin] = vmin
     plt.figure('Velocity Magnitude')
     cmap = plt.get_cmap('jet')
     plt.title('Velocity Magnitude')
     cf = plt.contourf(X, Y, v_map, levels=levels, vmin=vmin, vmax=vmax, cmap=cmap)
     clb = plt.colorbar(
         ScalarMappable(norm=cf.norm, cmap=cf.cmap),
-        ticks=range(vmin, vmax + 2, 2),
+        ticks=range(vmin, vmax + 1, 1),
         boundaries=level_boundaries,
         values=(level_boundaries[:-1] + level_boundaries[1:]) / 2, )
     clb.ax.set_title(r'$V$ (m/s)')
@@ -714,28 +717,36 @@ if plot_pressure_field:
         levels = 400
         # men = np.mean(cp_map)
         # rms = np.sqrt(np.mean((cp_map-men) ** 2))
-        # vmin = round(men - 3 * rms)
-        # vmax = round(men + 3 * rms)
-        vmin = -0.5
-        vmax = 0.5
-        level_boundaries = np.linspace(vmin, vmax, levels + 1)
+        # pmin = round(men - 3 * rms)
+        # pmax = round(men + 3 * rms)
+        pmin = -0.5
+        pmax = 0.5
+        # pmin = round(np.amin(cp_map))
+        # pmax = round(np.amax(cp_map))
+        level_boundaries = np.linspace(pmin, pmax, levels + 1)
 
     else:
 
         levels = 400
-        vmin = -1
-        vmax = 1
-        # vmin = round(np.amin(cp_map))
-        # vmax = round(np.amax(cp_map))
-        level_boundaries = np.linspace(vmin, vmax, levels + 1)
+        # men = np.mean(cp_map)
+        # rms = np.sqrt(np.mean((cp_map-men) ** 2))
+        # pmin = round(men - 0.5 * rms)
+        # pmax = round(men + 0.5 * rms)
+        pmin = -1
+        pmax = 1
+        # pmin = round(np.amin(cp_map))
+        # pmax = round(np.amax(cp_map))
+        level_boundaries = np.linspace(pmin, pmax, levels + 1)
 
+    cp_map[cp_map > pmax] = pmax
+    cp_map[cp_map < pmin] = pmin
     plt.figure('Pressure Distribution')
     cmap = plt.get_cmap('jet')
     plt.title('Pressure Distribution')
-    cf2 = plt.contourf(X, Y, cp_map, levels=levels, vmin=vmin, vmax=vmax, cmap=cmap)
+    cf2 = plt.contourf(X, Y, cp_map, levels=levels, vmin=pmin, vmax=pmax, cmap=cmap)
     clb = plt.colorbar(
         ScalarMappable(norm=cf2.norm, cmap=cf2.cmap),
-        #ticks=range(vmin, vmax + 1),
+        ticks=np.arange(pmin, pmax + 0.2, 0.2),
         boundaries=level_boundaries,
         values=(level_boundaries[:-1] + level_boundaries[1:]) / 2, )
     clb.ax.set_title(r'$C_p$ (-)')
