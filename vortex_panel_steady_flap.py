@@ -4,6 +4,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.cm import ScalarMappable
+import numba as nb
+import warnings
+
+warnings.simplefilter('ignore', category=nb.errors.NumbaPerformanceWarning)
 
 # ---------------------------------- #
 # Flags
@@ -77,22 +81,88 @@ def indvel(gammaj, x, y, xj, yj):  # Formula 11.1
     return uv
 
 
-def aijmatrix(xi, yi, xj, yj, Npan, ni):  # Calculation of the influence coefficients
+@nb.njit
+def lumpvor2d(xcol, zcol, xvor, zvor, circvor=1):
+    """
+    Compute the velocity at an arbitrary collocation point (xcol, zcol) due
+    to vortex element of circulation circvor, placed at (xvor, zvor).
+
+    :param xcol: x-coordinate of the collocation point
+    :param zcol: z-coordinate of the collocation point
+    :param xvor: x-coordinate of the vortex
+    :param zvor: z-coordinate of the vortex
+    :param circvor: circulation strength of the vortex (base units)
+
+    :return: 1D array containing the velocity vector (u, w) (x-comp., z-comp.)
+    :rtype: ndarray
+
+    """
+
+    # transformation matrix for the x, z distance between two points
+    dcm = np.array([[0.0, 1.0],
+                    [-1.0, 0.0]])
+
+    # magnitude of the distance between two points
+    r_vortex_sq = (xcol - xvor) ** 2 + (zcol - zvor) ** 2
+
+    if r_vortex_sq < 1e-8:  # some arbitrary threshold
+        return np.array([0.0, 0.0])
+
+    # the distance in x, and z between two points
+    dist_vec = np.array([xcol - xvor, zcol - zvor])
+
+    norm_factor = circvor / (2.0 * np.pi * r_vortex_sq)  # circulation at
+    # vortex element / circumferential distance
+
+    # induced velocity of vortex element on collocation point
+    vel_vor = norm_factor * dcm @ dist_vec
+
+    return vel_vor
+
+
+@nb.njit
+def aijmatrix(xcols, ycols, xvorts, yvorts, Npan, ni):  # Calculation of the influence coefficients
 
     print('   ...Computing influence matrix.')
-    aijmatrix = np.matrix(np.zeros((Npan, Npan)))
+
+    a_mat = np.zeros((Npan, Npan))
 
     print('   ...Computing induced velocities.')
+
     for i in range(0, Npan):
-
         for j in range(0, Npan):
+            vel_vor = lumpvor2d(xcols[i], ycols[i], xvorts[j], yvorts[j])
+            a_ij = vel_vor @ ni[:, i]
+            a_mat[i, j] = a_ij
 
-            uvmatrix = np.transpose(indvel(1, xi[i], yi[i], xj[j], yj[j]))  # Calculate (u,w), Formula 11.1
-            nmatrix = np.transpose(np.matrix([ni[0, i], ni[1, i]]))         # Prepare ni matrix
-            aij = np.matmul(uvmatrix, nmatrix)                              # Formula 11.5
-            aijmatrix[i, j] = aij                                           # Define aijmatrix
+    return a_mat
 
-    return aijmatrix
+
+
+@nb.njit()
+def compute_velocity_field(u_inf, x_mesh, y_mesh, x_vorts, y_vorts, gamma):
+    # Build velocity and pressure distribution
+    u = np.ones((len(x_mesh[:, 0]), len(y_mesh[0, :]))) * u_inf
+    v = np.zeros((len(x_mesh[:, 0]), len(y_mesh[0, :])))
+    v_map = np.zeros((len(x_mesh[:, 0]), len(y_mesh[0, :])))
+    cp_map = np.zeros((len(x_mesh[:, 0]), len(y_mesh[0, :])))
+
+    print('...Creating velocity and pressure distribution.\n')
+
+    for i in range(len(x_mesh[:, 0])):
+
+        print('   ...Row:', i + 1)
+
+        for j in range(len(y_mesh[0, :])):
+
+            for g in range(len(gamma)):
+                uv = lumpvor2d(X[i, j], Y[i, j], xx[g], yy[g], gamma[g])
+                u[i, j] = u[i, j] + uv[0]
+                v[i, j] = v[i, j] + uv[1]
+
+            v_map[i, j] = np.sqrt(u[i, j] ** 2 + v[i, j] ** 2)
+            cp_map[i, j] = 1 - (v_map[i, j] / u_inf) ** 2
+    return v_map, cp_map
 
 
 def calculation(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho):
@@ -188,29 +258,8 @@ if plot_velocity_field or plot_pressure_field:
     xp = result[5]
     yp = result[6]
 
-    # Build velocity and pressure distribution
-    u = np.ones((len(X), len(Y))) * U_0
-    v = np.zeros((len(X), len(Y)))
-    v_map = np.zeros((len(X), len(Y)))
-    cp_map = np.zeros((len(X), len(Y)))
-
     print('...Creating velocity and pressure distribution.\n')
-
-    for i in range(len(X[:, 1])):
-
-        print('   ...Row:', i+1)
-
-        for j in range(len(Y[1, :])):
-
-            for g, gamma in enumerate(gammaM):
-
-                uv = indvel(gamma, X[i, j], Y[i, j], xx[g], yy[g])
-                u[i, j] = u[i, j] + uv[0]
-                v[i, j] = v[i, j] + uv[1]
-
-            v_map[i, j] = np.sqrt(u[i, j]**2 + v[i, j]**2)
-            cp_map[i, j] = 1 - (v_map[i, j]/U_0)**2
-
+    v_map, cp_map = compute_velocity_field(U_0, X, Y, xx, yy, gammaM)
     print('')
 
 # ---------------------------------- #
