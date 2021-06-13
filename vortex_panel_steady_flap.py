@@ -14,14 +14,15 @@ warnings.simplefilter('ignore', category=nb.errors.NumbaPerformanceWarning)
 # Flags
 # ---------------------------------- #
 
-enable_flap         = True
+enable_flap         = False
 
 plot_backmesh       = False
 plot_camber         = False
-plot_cl_curve       = True
+plot_cl_curve       = False
 plot_velocity_field = True
-plot_pressure_field = True
+plot_pressure_field = False
 plot_deltaP         = False
+plot_panel_density  = True
 
 # ---------------------------------- #
 # Geometry and operations parameters
@@ -199,7 +200,7 @@ def calculation(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho):
     dpj = rho * U_0 * gammamatrix / dc      # Pressure difference
     dcpj = dpj/(0.5 * rho * (U_0**2))       # Pressure coefficient difference between upper and lower surface
 
-    return xc4, yc4, dcpj, Cl, gammamatrix, xp, yp
+    return xc4, yc4, dcpj, Cl, gammamatrix, xp, yp, dLj, dc
 
 # ---------------------------------- #
 # Solver
@@ -235,6 +236,30 @@ if plot_velocity_field or plot_pressure_field:
     print('...Creating velocity and pressure distribution.\n')
     v_map, cp_map = compute_velocity_field_ss(U_0, X, Y, xx, yy, gammaM)
     print('')
+
+if plot_panel_density:
+
+    print('...Building panel density plot.')
+    print('...Running solver.\n')
+
+    Nrange = [5, 20, 100]
+
+    clx = np.array([])
+    xxlist = np.array([])
+
+    for i, Npan in enumerate(Nrange):
+
+        # Discretization for X using cosine distribution
+        Npoints = Npan + 1
+        x = np.arange(1, Npoints + 1)
+        x = c / 2 * (1 - np.cos((x - 1) * np.pi / (Npoints - 1)))
+
+        # Flat plate
+        y = np.copy(x) * 0.
+
+        temp = calculation(y, x, Npan, Npan_flap, np.deg2rad(12), np.deg2rad(a_flap), c, c_flap, U_0, rho)
+        clx = np.append(clx, temp[7] / (0.5 * rho * U_0 ** 2 * temp[8]))
+        xxlist = np.append(xxlist, temp[0])
 
 # ---------------------------------- #
 # Figures
@@ -352,6 +377,19 @@ if plot_deltaP:
     plt.ylim(-3 , 6)
     plt.xlabel('x/c [-]')
     plt.ylabel(r'$Cp_l - Cp_u$ [-]')
+    plt.grid('True')
+    plt.legend()
+
+if plot_panel_density:
+
+    plt.figure("Panel Density Convergence")
+    plt.title("Panel Density Convergence")
+    plt.plot(xxlist[:5]/np.cos(np.deg2rad(12)) + c/4, clx[:5], '-r', label='Npan = 5')
+    plt.plot(xxlist[5:25]/np.cos(np.deg2rad(12)) + c/4, clx[5:25], '.b', label='Npan = 20')
+    plt.plot(xxlist[25:125]/np.cos(np.deg2rad(12)) + c/4, clx[25:125], '--g', label='Npan = 100')
+    plt.ylim(0, 10)
+    plt.xlabel('x/c [-]')
+    plt.ylabel(r'$C_l$ [-]')
     plt.grid('True')
     plt.legend()
 
