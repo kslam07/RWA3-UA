@@ -21,15 +21,15 @@ enable_pitching     = True
 enable_gust         = True
 add_meshrefinement  = False
 apply_camber        = False
-visualize_wake      = True
+visualize_wake      = False
 
-plot_backmesh       = False
+plot_backmesh       = True
 plot_camber         = False
 plot_ss_cl_curve    = False
-plot_velocity_field = True
+plot_velocity_field = False
 plot_pressure_field = False
 plot_CLcirc         = False
-plot_deltaP_comp    = False
+plot_deltaP_comp    = True
 
 # ---------------------------------- #
 # Geometry and operations parameters
@@ -52,11 +52,13 @@ xres = 200              # Grid discretization in x direction
 yres = 50               # Grid discretization in y direction
 
 # Operations
-rho = 1.225             # (kg/m^3) free-stream density
-U_0 = 10                # (m/s) free-stream velocity in x
-k = 0.1                 # (Hz) Reduced frequency: 0.02, 0.05, 0.1
-omega = k*2*U_0/c       # (Hz) Frequency of the unsteadiness
-amp = np.deg2rad(15)    # (deg) Amplitude of the pitching motion
+rho = 1.225                         # (kg/m^3) free-stream density
+U_0 = 10                            # (m/s) free-stream velocity in x
+AoA = 12                            # Angle of attack (for specific alpha cases)
+alpha_range = np.arange(-4, 15)     # Range of AoA for cl curves
+k = 0.1                             # (Hz) Reduced frequency: 0.02, 0.05, 0.1
+omega = k*2*U_0/c                   # (Hz) Frequency of the unsteadiness
+amp = np.deg2rad(AoA)               # (rad) Amplitude of the pitching motion
 
 # Time
 start = 0                                   # Start time
@@ -81,13 +83,13 @@ else:
 if add_meshrefinement:
 
     # Add refinement in the vicinity of the flat plate
-    xrange = np.linspace(-2.0 * c, wl * c, xres)*(1 - 0.2 * np.sin(np.linspace(0, np.pi, xres)))
-    yrange = np.linspace(-3 * c, 3 * c, yres)*(1 - 0.9 * np.sin(np.linspace(0, np.pi, yres)))
+    xrange = np.linspace(-1.0 * c, wl * c, xres)*(1 - 0.2 * np.sin(np.linspace(0, np.pi, xres)))
+    yrange = np.linspace(-3.0 * c, 3.0 * c, yres)*(1 - 0.9 * np.sin(np.linspace(0, np.pi, yres)))
 
 else:
 
-    xrange = np.linspace(-2.0 * c, wl * c, xres)
-    yrange = np.linspace(-3 * c, 3 * c, yres)
+    xrange = np.linspace(-1.0 * c, wl * c, xres)
+    yrange = np.linspace(-3.0 * c, 3.0 * c, yres)
 
 # Create grid
 [X, Y] = np.meshgrid(xrange, yrange)
@@ -181,6 +183,7 @@ def aijmatrix(xcols, ycols, xvorts, yvorts, Npan, ni):  # Calculation of the inf
 def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
     """
     Calculation of the influence coefficients
+
     :param xi: x-coords of collocation points
     :param yi: y-coords of collocation points
     :param a_mat: influence coefficient matrix excluding the wake influence
@@ -188,6 +191,7 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
     :param y_wake: y-pos of trailing edge wake
     :param ni: array containing the normal vectors
     :param wake_gamma: circulation of the wake vortex (unit strength)
+
     :return: new influence matrix (a_mat) and RHS contribution of the wake vortices (v_norm)
     """
 
@@ -376,7 +380,7 @@ def steady_VP(y, x, Npan, Npan_flap, alpha, a_flap, c, c_flap, U_0, rho, key):
     return xc4, yc4, dcpj, Cl, gammamatrix, xp, yp
 
 
-def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap, U_0, V_0, rho):
+def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap, U_0, rho):
 
     print('   ...Initialize influence matrix.')
 
@@ -440,14 +444,13 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         print(f"   Time step: {t+1}/{len(trange)-1}")
         print('   ...Creating geometry.')
 
-        if enable_gust and trange[t] >= gstart and trange[t] <= gstop:
+        if enable_gust and gstart <= trange[t] <= gstop:
 
             V_0 = 3     # (m/s) free-stream velocity in y
 
         else:
 
             V_0 = 0     # (m/s) free-stream velocity in y
-
 
         xp = x * np.cos(alpha_arr[t]) + y * np.sin(alpha_arr[t])
         yp = -x * np.sin(alpha_arr[t]) + y * np.cos(alpha_arr[t])
@@ -461,7 +464,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         dc = np.sqrt(dx**2 + dy**2)
 
         # Further induced geometry calculations
-        alpha_i = np.arctan2(dy, dx)  # Induced AoA by panel slope
+        alpha_i = np.arctan2(dy, dx)                            # Induced AoA by panel slope
         ni = np.array([np.sin(-alpha_i), np.cos(-alpha_i)])     # Normal vector; First index = x, second index = y
         ti = np.array([np.cos(alpha_i), -np.sin(alpha_i)])      # Tan. vector; first index = x, second index = y
 
@@ -560,7 +563,6 @@ if plot_ss_cl_curve:
     print('...Building lift curve.')
     print('...Running solver.\n')
 
-    alpha_range = np.arange(-4, 15)  # Range of AoA
     cl_arr = np.zeros(len(alpha_range))  # Lift coefficient log
 
     for i, alpha in enumerate(alpha_range):
@@ -581,7 +583,7 @@ if plot_velocity_field or plot_pressure_field:
 
     if enable_pitching:
 
-        result = unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, np.deg2rad(a_flap), c, c_flap, U_0, V_0, rho)
+        result = unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, np.deg2rad(a_flap), c, c_flap, U_0, rho)
 
         xx = result[0]
         yy = result[1]
@@ -596,7 +598,7 @@ if plot_velocity_field or plot_pressure_field:
 
     else:
 
-        result = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(15), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+        result = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(AoA), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
 
         xx = result[0]
         yy = result[1]
@@ -633,7 +635,7 @@ plt.close('all')
 
 if plot_backmesh:
 
-    temp = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(8), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=1)
+    temp = steady_VP(y, x, Npan, Npan_flap, np.deg2rad(AoA), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=1)
     xp = temp[0]
     yp = temp[1]
     plt.figure("Background Mesh")
@@ -731,13 +733,13 @@ if plot_pressure_field:
 if plot_camber:
 
     # Calculate Y-coordinates according to naca4 airfoil
-    ycb = naca4(c, camber, 0.4, x)   # Calculate camber line for 4%
-    yflat = np.copy(x) * 0.         # Flat plate
+    ycb = naca4(c, camber, 0.4, x)      # Calculate camber line
+    yflat = np.copy(x) * 0.             # Flat plate
 
     plt.figure("Camber Lines")
     plt.title('Camber lines')
     plt.plot(x, yflat, '-ob', markevery=5, label='Flat plate')
-    plt.plot(x, ycb, '-or', markevery=5, label='4% Camber')
+    plt.plot(x, ycb, '-or', markevery=5, label=str(camber*100)+'% Camber')
     plt.xlabel('x/c [-]')
     plt.ylabel('y/c [-]')
     plt.xticks(np.arange(min(x), max(x) + 0.1, 0.1))
@@ -748,17 +750,17 @@ if plot_camber:
 if plot_deltaP_comp:
 
     # Calculate Y-coordinates according to naca4 airfoil
-    ycb = naca4(c, camber, 0.4, x)   # Calculate camber line for 4%
-    yflat = np.copy(x) * 0.         # Flat plate
+    ycb = naca4(c, camber, 0.4, x)   # Calculate camber line
+    yflat = np.copy(x) * 0.          # Flat plate
 
     # Results needed for plotting
-    result_flat = steady_VP(yflat, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
-    result_c4 = steady_VP(ycb, x, Npan, Npan_flap, np.deg2rad(4), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+    result_flat = steady_VP(yflat, x, Npan, Npan_flap, np.deg2rad(AoA), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
+    result_c4 = steady_VP(ycb, x, Npan, Npan_flap, np.deg2rad(AoA), np.deg2rad(a_flap), c, c_flap, U_0, rho, key=0)
 
     plt.figure("Pressure Difference")
     plt.title("Pressure Difference")
-    plt.plot(result_flat[0], result_flat[2], '-b', label='Flat Plate')
-    plt.plot(result_c4[0], result_c4[2], '-r', label='4% Camber')
+    plt.plot(result_flat[0]/np.cos(np.deg2rad(AoA)) + c/4, result_flat[2], '-b', label='Flat Plate')
+    plt.plot(result_c4[0]/np.cos(np.deg2rad(AoA)) + c/4, result_c4[2], '-r', label=str(camber*100)+'% Camber')
     plt.ylim(-3 , 6)
     plt.xlabel('x/c [-]')
     plt.ylabel(r'$Cp_l - Cp_u$ [-]')
