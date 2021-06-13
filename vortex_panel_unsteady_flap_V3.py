@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 from matplotlib.cm import ScalarMappable
 import numba as nb
 import warnings
+from post_process import plot_circulatory_loads
+
 warnings.simplefilter('ignore', category=nb.errors.NumbaPerformanceWarning)
 
 # ---------------------------------- #
@@ -230,6 +232,7 @@ def compute_pressure_and_loads(u_inf, v_inf, dc, gamma_vec, gamma_vec_old, theta
     # freestream speed
     v_eff = np.sqrt(u_inf ** 2 + v_inf ** 2)
 
+    # UNSTEADY LIFT COEFFICIENT
     # compute time derivative contribution
     gamma_k_old = np.cumsum(gamma_vec_old)
     gamma_k = np.cumsum(gamma_vec)
@@ -239,13 +242,13 @@ def compute_pressure_and_loads(u_inf, v_inf, dc, gamma_vec, gamma_vec_old, theta
 
     # lift coefficient per panel and airfoil lift coefficient
     cl_per_sec = delta_p / (0.5 * rho * v_eff**2)
-    cl = np.sum(delta_p * dc * np.cos(theta)) / (0.5 * rho * v_eff**2)
+    cl = np.sum(cl_per_sec * dc * np.cos(theta))
 
-    # lift coefficient for steady-state case
+    # STEADY LIFT COEFFICIENT
     cl_per_sec_ss = 2 * gamma_steady / v_eff / dc
     cl_ss = np.sum(cl_per_sec_ss * dc)  # weighted average of the panel lengths
 
-    return delta_p, cl_per_sec, cl_per_sec_ss, cl, cl_ss
+    return delta_p, cl, cl_ss
 
 
 @nb.njit()
@@ -432,6 +435,9 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
     gamma_arr = np.zeros((len(trange) + 1, Npan))
     xwake = np.array([x[-1]])
     ywake = np.array([0])
+    cl_unsteady_arr = np.zeros(len(trange))
+    cl_steady_arr = np.zeros(len(trange))
+    delta_p_arr = np.zeros((len(trange), Npan))
 
     # Storage arrays for all time steps
     xp_arr = np.zeros((Npan + 1, len(trange)))
@@ -439,9 +445,9 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 
     print('   ...Start time loop.\n')
 
-    for t in range(len(trange)-1):  # not actually time but nth timestep
+    for t in range(len(trange)):  # not actually time but nth timestep
 
-        print(f"   Time step: {t+1}/{len(trange)-1}")
+        print(f"   Time step: {t+1}/{len(trange)}")
         print('   ...Creating geometry.')
 
         if enable_gust and gstart <= trange[t] <= gstop:
@@ -458,7 +464,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         xp_arr[:, t] = xp
         yp_arr[:, t] = yp
 
-        # Calculate dx,dy,dc component per panel (dc = panel length)
+        # Calculate dx, dy, dc component per panel (dc = panel length)
         dx = np.delete(np.roll(xp, -1) - xp, -1)
         dy = np.delete(np.roll(yp, -1) - yp, -1)
         dc = np.sqrt(dx**2 + dy**2)
@@ -484,7 +490,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         # Calculate last column influence matrix (influence of trailing edge vortex wake)
         aij_mat, v_norm = aijmatrix2(aij_mat, xcp, ycp, xwake, ywake, ni, wake_gamma)
 
-        # Steady-state RHS
+        # Solve steady-state system
         RHS_ss = U_0 * np.sin(alpha_arr[t]) * np.ones(Npan)
         gamma_ss_vec = -(np.linalg.inv(aij_mat[:-1, :-1]) @ RHS_ss)
 
@@ -501,7 +507,6 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         # directly solve system and obtain new circulation over airfoil and trailing edge vortex wake
         gamma_vec = -(np.linalg.inv(aij_mat) @ RHS)
         wake_gamma = np.append(wake_gamma, gamma_vec[-1])   # log circulation of wake
-        # todo: why are we doing this?
         gamma_arr[t + 1] = gamma_vec[:-1]                   # log circulation of each panel
 
         print('   ...Computing wake sheet roll-up.')
@@ -517,9 +522,17 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
 
         print('   ...Calculating lift and pressure.\n')
         # Secondary computations
-        compute_pressure_and_loads(U_0, 0.0, dc, gamma_arr[t+1], gamma_arr[t], alpha_arr[t], gamma_steady=gamma_ss_vec)
+        delta_p, cl, cl_ss = compute_pressure_and_loads(U_0, V_0, dc, gamma_arr[t+1], gamma_arr[t], alpha_arr[t],
+                                                        gamma_ss_vec)
+        # log pressure and loads
+        cl_unsteady_arr[t] = cl
+        cl_steady_arr[t] = cl_ss
+        delta_p_arr[t] = delta_p
 
-    return xc4, yc4, xp, yp, gamma_vec, wake_gamma, xwake, ywake
+    # sort in dictionary
+    results_unsteady = {"delta_p": delta_p_arr, "cl_unsteady": cl_unsteady_arr, "cl_steady": cl_steady_arr}
+
+    return xc4, yc4, xp, yp, gamma_vec, wake_gamma, xwake, ywake, results_unsteady
 
 # ---------------------------------- #
 # Solver
@@ -554,7 +567,7 @@ if enable_pitching:
     dalpha_arr = amp * omega * np.cos(omega * trange)   # Derivative of AoA log
 
 if enable_gust:
-
+    alpha_arr = np.zeros(len(trange))
     gstart = stop/5
     gstop = stop/5 + (len(trange)/5)*dt
 
@@ -767,8 +780,9 @@ if plot_deltaP_comp:
     plt.grid('True')
     plt.legend()
 
-if plot_CLcirc:
-    pass
+if (plot_CLcirc and enable_pitching) or (plot_CLcirc and enable_gust):
+    plot_circulatory_loads(alpha_arr, result[8]["cl_unsteady"], alpha_arr, result[8]["cl_steady"])
+
 
 plt.show()
 print('\nDone.')
