@@ -18,12 +18,12 @@ print('...Setting flags based on user input.')
 enable_cos_dist     = True
 enable_flap         = False
 enable_pitching     = True
-enable_gust         = True
+enable_gust         = False
 add_meshrefinement  = False
 apply_camber        = False
 visualize_wake      = True
 
-plot_backmesh       = True
+plot_backmesh       = False
 plot_camber         = False
 plot_ss_cl_curve    = False
 plot_velocity_field = True
@@ -54,7 +54,7 @@ yres = 50               # Grid discretization in y direction
 # Operations
 rho = 1.225                         # (kg/m^3) free-stream density
 U_0 = 10                            # (m/s) free-stream velocity in x
-AoA = 12                            # Angle of attack (for specific alpha cases)
+AoA = 15                            # Angle of attack (for specific alpha cases)
 alpha_range = np.arange(-4, 15)     # Range of AoA for cl curves
 k = 0.1                             # (Hz) Reduced frequency: 0.02, 0.05, 0.1
 omega = k*2*U_0/c                   # (Hz) Frequency of the unsteadiness
@@ -660,7 +660,7 @@ if plot_velocity_field:
 
     if enable_pitching:
 
-        levels = 1000
+        levels = 400
         men = np.mean(v_map)
         rms = np.sqrt(np.mean((v_map-men) ** 2))
         vmin = int(round(men - 3 * rms))
@@ -673,20 +673,22 @@ if plot_velocity_field:
 
         levels = 400
         men = np.mean(v_map)
-        rms = np.sqrt(np.mean(v_map ** 2))
+        rms = np.sqrt(np.mean((v_map) ** 2))
         vmin = round(men - 0.5 * rms)
         vmax = round(men + 0.5 * rms)
         # vmin = round(np.amin(v_map))
         # vmax = round(np.amax(v_map))
         level_boundaries = np.linspace(vmin, vmax, levels + 1)
 
+    v_map[v_map > vmax] = vmax
+    v_map[v_map < vmin] = vmin
     plt.figure('Velocity Magnitude')
     cmap = plt.get_cmap('jet')
     plt.title('Velocity Magnitude')
     cf = plt.contourf(X, Y, v_map, levels=levels, vmin=vmin, vmax=vmax, cmap=cmap)
     clb = plt.colorbar(
         ScalarMappable(norm=cf.norm, cmap=cf.cmap),
-        ticks=range(vmin, vmax + 2, 2),
+        ticks=range(vmin, vmax + 1, 1),
         boundaries=level_boundaries,
         values=(level_boundaries[:-1] + level_boundaries[1:]) / 2, )
     clb.ax.set_title(r'$V$ (m/s)')
@@ -701,28 +703,36 @@ if plot_pressure_field:
         levels = 400
         # men = np.mean(cp_map)
         # rms = np.sqrt(np.mean((cp_map-men) ** 2))
-        # vmin = round(men - 3 * rms)
-        # vmax = round(men + 3 * rms)
-        vmin = -0.5
-        vmax = 0.5
-        level_boundaries = np.linspace(vmin, vmax, levels + 1)
+        # pmin = round(men - 3 * rms)
+        # pmax = round(men + 3 * rms)
+        pmin = -0.5
+        pmax = 0.5
+        # pmin = round(np.amin(cp_map))
+        # pmax = round(np.amax(cp_map))
+        level_boundaries = np.linspace(pmin, pmax, levels + 1)
 
     else:
 
         levels = 400
-        vmin = -1
-        vmax = 1
-        # vmin = round(np.amin(cp_map))
-        # vmax = round(np.amax(cp_map))
-        level_boundaries = np.linspace(vmin, vmax, levels + 1)
+        # men = np.mean(cp_map)
+        # rms = np.sqrt(np.mean((cp_map-men) ** 2))
+        # pmin = round(men - 0.5 * rms)
+        # pmax = round(men + 0.5 * rms)
+        pmin = -1
+        pmax = 1
+        # pmin = round(np.amin(cp_map))
+        # pmax = round(np.amax(cp_map))
+        level_boundaries = np.linspace(pmin, pmax, levels + 1)
 
+    cp_map[cp_map > pmax] = pmax
+    cp_map[cp_map < pmin] = pmin
     plt.figure('Pressure Distribution')
     cmap = plt.get_cmap('jet')
     plt.title('Pressure Distribution')
-    cf2 = plt.contourf(X, Y, cp_map, levels=levels, vmin=vmin, vmax=vmax, cmap=cmap)
+    cf2 = plt.contourf(X, Y, cp_map, levels=levels, vmin=pmin, vmax=pmax, cmap=cmap)
     clb = plt.colorbar(
         ScalarMappable(norm=cf2.norm, cmap=cf2.cmap),
-        #ticks=range(vmin, vmax + 1),
+        ticks=np.arange(pmin, pmax + 0.2, 0.2),
         boundaries=level_boundaries,
         values=(level_boundaries[:-1] + level_boundaries[1:]) / 2, )
     clb.ax.set_title(r'$C_p$ (-)')
