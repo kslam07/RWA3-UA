@@ -155,9 +155,6 @@ def lumpvor2d(xcol, zcol, xvor, zvor, circvor=1):
     # magnitude of the distance between two points
     r_vortex_sq = (xcol - xvor) ** 2 + (zcol - zvor) ** 2
 
-    if r_vortex_sq < 1e-9:  # some arbitrary threshold
-        return np.array([0.0, 0.0])
-
     # the distance in x, and z between two points
     dist_vec = np.array([xcol - xvor, zcol - zvor])
 
@@ -214,8 +211,8 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
         a_mat[i, -1] = uv @ ni[:, i]
 
         # determine RHS contribution of wake vortices (except trailing edge wake vortex)
-        for j in range(len(wake_gamma[:-1])):
-            uv = lumpvor2d(xi[i], yi[i], x_wake[j], y_wake[j])
+        for j, gamma in enumerate(wake_gamma):
+            uv = lumpvor2d(xi[i], yi[i], x_wake[j+1], y_wake[j+1], gamma)  # size(x_wake) > size(wake_gamma)
             v_norm[i] = v_norm[i] + uv @ ni[:, i]
 
     return a_mat, v_norm
@@ -257,7 +254,7 @@ def compute_pressure_and_loads(u_inf, v_inf, dc, dt, gamma_vec, gamma_vec_old, t
 
 
 @nb.njit
-def roll_vortex_wake(x_vor, y_vor, gamma_airfoil, x_wake, y_wake, gamma_wake, dt):
+def roll_vortex_wake(x_vor, y_vor, gamma_airfoil, x_wake, y_wake, gamma_wake, u_inf, dt):
     """
     Computes new location of vortex wake as it is convected by the local stream velocity
     :param x_vor: x-coords of vortices on airfoil
@@ -275,8 +272,9 @@ def roll_vortex_wake(x_vor, y_vor, gamma_airfoil, x_wake, y_wake, gamma_wake, dt
         for x_vor_j, y_vor_j, gamma_airfoil_j in zip(x_vor, y_vor, gamma_airfoil):
             uw += lumpvor2d(x_wake_i, y_wake_i, x_vor_j, y_vor_j, gamma_airfoil_j)
         # contribution from the vortices in the wake
-        for x_wake_k, y_wake_k, gamma_wake_k in zip(x_wake, y_wake, gamma_wake):
-            uw += lumpvor2d(x_wake_i, y_wake_i, x_wake_k, y_wake_k, gamma_wake_k)
+        for iv, (x_wake_k, y_wake_k, gamma_wake_k) in enumerate(zip(x_wake, y_wake, gamma_wake)):
+            if iv != i:  # ignore self-induction (div. by zero)
+                uw += lumpvor2d(x_wake_i, y_wake_i, x_wake_k, y_wake_k, gamma_wake_k)
         uw_mat[i] = uw
 
     # determine change in (x,y) coordinates of wake vortices
@@ -486,21 +484,22 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         wake_gamma = np.append(wake_gamma, gamma_vec[-1])   # log circulation of wake
         gamma_arr[t + 1] = gamma_vec[:-1]                   # log circulation of each panel
 
-        print('   ...Computing wake sheet roll-up.')
+        print('   ...Calculating lift and pressure.\n')
+        # Secondary computations
+        delta_p, cl, cl_ss = compute_pressure_and_loads(U_0, V_0, dc, dt, gamma_arr[t+1], gamma_arr[t], alpha_arr[t],
+                                                        gamma_ss_vec, rho)
 
         # compute wake sheet roll-up
-        # xwake, ywake = roll_vortex_wake(xc4, yc4, gamma_vec, xwake, ywake, wake_gamma, dt)
+        # print('   ...Computing wake sheet roll-up.')
+        # xwake, ywake = roll_vortex_wake(xc4, yc4, gamma_vec[:-1], xwake, ywake, wake_gamma, dt, U_0)
 
-        xwake = xwake + U_0*dt
+        # add new vortex wake
+        xwake = xwake + U_0 * dt
         xwake_new = xp[-1] + 0.25 * (xwake[t] - xp[-1])
         ywake_new = yp[-1] + 0.25 * (ywake[t] - yp[-1])
         xwake = np.append(xwake, xwake_new)
         ywake = np.append(ywake, ywake_new)
 
-        print('   ...Calculating lift and pressure.\n')
-        # Secondary computations
-        delta_p, cl, cl_ss = compute_pressure_and_loads(U_0, V_0, dc, dt, gamma_arr[t+1], gamma_arr[t], alpha_arr[t],
-                                                        gamma_ss_vec, rho)
         # log pressure and loads
         cl_unsteady_arr[t] = cl
         cl_steady_arr[t] = cl_ss
