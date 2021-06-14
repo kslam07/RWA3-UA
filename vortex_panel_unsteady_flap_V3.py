@@ -20,18 +20,19 @@ print('...Setting flags based on user input.')
 enable_cos_dist     = True
 enable_flap         = False
 enable_pitching     = True
-enable_gust         = True
+enable_gust         = False
 add_meshrefinement  = False
 apply_camber        = False
 visualize_wake      = False
 
-plot_backmesh       = True
+plot_backmesh       = False
 plot_camber         = False
 plot_ss_cl_curve    = False
 plot_velocity_field = False
 plot_pressure_field = False
 plot_CLcirc         = False
-plot_deltaP_comp    = True
+plot_deltaP_comp    = False
+plot_dt_comp        = True
 
 # ---------------------------------- #
 # Geometry and operations parameters
@@ -56,7 +57,7 @@ yres = 50               # Grid discretization in y direction
 # Operations
 rho = 1.225                         # (kg/m^3) free-stream density
 U_0 = 10                            # (m/s) free-stream velocity in x
-AoA = 15                            # Angle of attack (for specific alpha cases)
+AoA = 10                            # Angle of attack (for specific alpha cases)
 alpha_range = np.arange(-4, 15)     # Range of AoA for cl curves
 k = 0.1                             # (Hz) Reduced frequency: 0.02, 0.05, 0.1
 omega = k*2*U_0/c                   # (Hz) Frequency of the unsteadiness
@@ -750,6 +751,35 @@ if plot_deltaP_comp:
 if (plot_CLcirc and enable_pitching) or (plot_CLcirc and enable_gust):
     plot_circulatory_loads(alpha_arr, result[8]["cl_unsteady"], alpha_arr, result[8]["cl_steady"])
 
+if plot_dt_comp:
+
+    colors = ["r", "b", "g", "m"]
+    style = ["-", "--", "-.", "."]
+
+    #dt_list = [0.5, 0.1, 0.05, 0.01]
+    dt_list = [1.0, 0.5, 0.1, 0.05]
+
+    for i, dt in enumerate(dt_list):
+
+        trange = np.arange(start, stop + dt, dt)  # Time log
+        alpha_arr = amp * np.sin(omega * trange)  # AoA log
+        dalpha_arr = amp * omega * np.cos(omega * trange)  # Derivative of AoA log
+
+        temp = unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, np.deg2rad(a_flap), c, c_flap, U_0, rho)
+        result = temp[8]
+        values = result.values()
+        values_list = list(values)
+        cl_us = values_list[1]
+        cl_ss = values_list[2]
+
+        plt.figure("Time step convergence")
+        plt.title("Time step convergence")
+        plt.plot(trange, cl_ss, style[i]+colors[i], label='dt ='+str(dt))
+        #plt.ylim(-3, 6)
+        plt.xlabel('t [s]')
+        plt.ylabel(r'$C_l [-]$')
+        plt.grid('True')
+        plt.legend()
 
 plt.show()
 print('\nDone.')
