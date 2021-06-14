@@ -213,8 +213,8 @@ def aijmatrix2(a_mat, xi, yi, x_wake, y_wake, ni, wake_gamma):
         a_mat[i, -1] = uv @ ni[:, i]
 
         # determine RHS contribution of wake vortices (except trailing edge wake vortex)
-        for j in range(len(wake_gamma[:-1])):
-            uv = lumpvor2d(xi[i], yi[i], x_wake[j], y_wake[j])
+        for j, gamma in enumerate(wake_gamma):
+            uv = lumpvor2d(xi[i], yi[i], x_wake[j], y_wake[j], gamma)
             v_norm[i] = v_norm[i] + uv @ ni[:, i]
 
     return a_mat, v_norm
@@ -256,7 +256,7 @@ def compute_pressure_and_loads(u_inf, v_inf, dc, dt, gamma_vec, gamma_vec_old, t
 
 
 @nb.njit
-def roll_vortex_wake(x_vor, y_vor, gamma_airfoil, x_wake, y_wake, gamma_wake, dt):
+def roll_vortex_wake(x_vor, y_vor, gamma_airfoil, x_wake, y_wake, gamma_wake, u_inf, dt):
     """
     Computes new location of vortex wake as it is convected by the local stream velocity
     :param x_vor: x-coords of vortices on airfoil
@@ -485,21 +485,23 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         wake_gamma = np.append(wake_gamma, gamma_vec[-1])   # log circulation of wake
         gamma_arr[t + 1] = gamma_vec[:-1]                   # log circulation of each panel
 
-        print('   ...Computing wake sheet roll-up.')
+        print('   ...Calculating lift and pressure.\n')
+        # Secondary computations
+        delta_p, cl, cl_ss = compute_pressure_and_loads(U_0, V_0, dc, dt, gamma_arr[t+1], gamma_arr[t], alpha_arr[t],
+                                                        gamma_ss_vec, rho)
 
         # compute wake sheet roll-up
-        # xwake, ywake = roll_vortex_wake(xc4, yc4, gamma_vec, xwake, ywake, wake_gamma, dt)
-
+        print('   ...Computing wake sheet roll-up.')
         xwake = xwake + U_0*dt
+        xwake, ywake = roll_vortex_wake(xc4, yc4, gamma_vec[:-1], xwake, ywake, wake_gamma, dt, U_0)
+
+        # add new vortex wake
         xwake_new = xp[-1] + 0.25 * (xwake[t] - xp[-1])
         ywake_new = yp[-1] + 0.25 * (ywake[t] - yp[-1])
         xwake = np.append(xwake, xwake_new)
         ywake = np.append(ywake, ywake_new)
 
-        print('   ...Calculating lift and pressure.\n')
-        # Secondary computations
-        delta_p, cl, cl_ss = compute_pressure_and_loads(U_0, V_0, dc, dt, gamma_arr[t+1], gamma_arr[t], alpha_arr[t],
-                                                        gamma_ss_vec, rho)
+
         # log pressure and loads
         cl_unsteady_arr[t] = cl
         cl_steady_arr[t] = cl_ss
