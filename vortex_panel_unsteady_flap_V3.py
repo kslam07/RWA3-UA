@@ -56,7 +56,8 @@ yres = 50               # Grid discretization in y direction
 # Operations
 rho = 1.225                         # (kg/m^3) free-stream density
 U_0 = 10                            # (m/s) free-stream velocity in x
-AoA = 15                            # Angle of attack (for specific alpha cases)
+v_gust = 2                          # gust in vertical direction [m/s]
+AoA = 6                             # Angle of attack (for specific alpha cases)
 alpha_range = np.arange(-4, 15)     # Range of AoA for cl curves
 k = 0.1                             # (Hz) Reduced frequency: 0.02, 0.05, 0.1
 omega = k*2*U_0/c                   # (Hz) Frequency of the unsteadiness
@@ -68,8 +69,7 @@ stop = 10                                   # Stop time
 dt = 0.1                                    # Time step
 trange = np.arange(start, stop + dt, dt)    # Time log
 alpha_arr = np.zeros(len(trange))
-gstart = stop/5                             # Start gust (if active)
-gstop = stop/5 + 2*(len(trange)/5)*dt       # Stop gust (if active)
+gust_start = 5                              # gust start time [s]
 
 # ---------------------------------- #
 # Create Grid
@@ -421,10 +421,10 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         print(f"   Time step: {t+1}/{len(trange)}")
         print('   ...Creating geometry.')
 
-        if enable_gust and gstart <= trange[t] <= gstop:
+        if enable_gust and trange[t] > gust_start:
 
             print('   ...Gust active')
-            V_0 = 3     # (m/s) free-stream velocity in y
+            V_0 = v_gust     # (m/s) free-stream velocity in y
 
         else:
 

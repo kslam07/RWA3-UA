@@ -54,13 +54,13 @@ def plot_circulatory_loads(alpha_circ, cl_circ, alpha_ss, cl_ss):
 
     fig, ax = plt.subplots(1, 1, dpi=150, constrained_layout=True)
 
-    ax.plot(np.degrees(alpha_circ), cl_circ, label=r"Circulatory $C_l$")
-    ax.plot(np.degrees(alpha_ss), cl_ss, label=r"Non-circulatory $C_l$")
+    ax.plot(np.degrees(alpha_circ), cl_circ, label=r"Unsteady $C_l$")
+    ax.plot(np.degrees(alpha_ss), cl_ss, label=r"Steady $C_l$")
 
     ax.grid()
-    ax.legend(prop={"size": 12})
-    ax.set_xlabel(r"$\alpha$ $[\circ]$", fontsize=12)
-    ax.set_ylabel(r"$C_l$ [-]", fontsize=12)
+    ax.legend(prop={"size": 14})
+    ax.set_xlabel(r"$\alpha$ $[\circ]$", fontsize=14)
+    ax.set_ylabel(r"$C_l$ [-]", fontsize=14)
 
 
 @nb.njit()
