@@ -30,7 +30,8 @@ plot_camber         = False
 plot_ss_cl_curve    = False
 plot_velocity_field = True
 plot_pressure_field = False
-plot_CLcirc         = False
+plot_CLcirc         = True
+plot_dt_comp        = False
 plot_deltaP_comp    = False
 
 # ---------------------------------- #
