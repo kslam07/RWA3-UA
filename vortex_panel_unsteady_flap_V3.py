@@ -633,8 +633,8 @@ if plot_velocity_field:
         levels = 400
         men = np.mean(v_map)
         rms = np.sqrt(np.mean((v_map-men) ** 2))
-        vmin = int(round(men - 3 * rms))
-        vmax = int(round(men + 3 * rms))
+        vmin = round(men - 3 * rms, 1)
+        vmax = round(men + 3 * rms, 1)
         # vmin = round(np.amin(v_map))
         # vmax = round(np.amax(v_map))
         level_boundaries = np.linspace(vmin, vmax, levels + 1)
@@ -648,23 +648,24 @@ if plot_velocity_field:
         vmax = round(men + 0.5 * rms)
         # vmin = round(np.amin(v_map))
         # vmax = round(np.amax(v_map))
-        level_boundaries = np.linspace(vmin, vmax, levels + 1)
+        level_boundaries = np.linspace(vmin, vmax+0.001, levels + 1)
 
-    v_map[v_map > vmax] = vmax
-    v_map[v_map < vmin] = vmin
-    plt.figure('Velocity Magnitude')
+    v_map[v_map > vmax] = vmax * 0.999
+    v_map[v_map < vmin] = vmin * 1.001
+    plt.figure('Velocity Magnitude', dpi=100, constrained_layout=True)
     cmap = plt.get_cmap('jet')
-    plt.title('Velocity Magnitude')
+    plt.title('Velocity Magnitude', fontsize=16)
     cf = plt.contourf(X, Y, v_map, levels=levels, vmin=vmin, vmax=vmax, cmap=cmap)
     clb = plt.colorbar(
         ScalarMappable(norm=cf.norm, cmap=cf.cmap),
-        ticks=range(vmin, vmax + 1, 1),
+        ticks=np.round(np.linspace(vmin, vmax, 4), 1),
         boundaries=level_boundaries,
-        values=(level_boundaries[:-1] + level_boundaries[1:]) / 2, )
-    clb.ax.set_title(r'$V$ (m/s)')
+        values=(level_boundaries[:-1] + level_boundaries[1:]) / 2,
+        )
+    clb.ax.set_title(r'$V$ (m/s)', fontsize=14)
     plt.plot(xp, yp, '-k', lw=2.)
-    plt.xlabel('x/c [-]')
-    plt.ylabel('y/c [-]')
+    plt.xlabel('x/c [-]', fontsize=16)
+    plt.ylabel('y/c [-]', fontsize=16)
 
 if plot_pressure_field:
 
@@ -716,16 +717,16 @@ if plot_camber:
     ycb = naca4(c, camber, 0.4, x)      # Calculate camber line
     yflat = np.copy(x) * 0.             # Flat plate
 
-    plt.figure("Camber Lines")
-    plt.title('Camber lines')
+    plt.figure("Camber Lines", dpi=100, constrained_layout=True)
+    plt.title('Camber lines', fontsize=16)
     plt.plot(x, yflat, '-ob', markevery=5, label='Flat plate')
     plt.plot(x, ycb, '-or', markevery=5, label=str(camber*100)+'% Camber')
-    plt.xlabel('x/c [-]')
-    plt.ylabel('y/c [-]')
+    plt.xlabel('x/c [-]', fontsize=16)
+    plt.ylabel('y/c [-]', fontsize=16)
     plt.xticks(np.arange(min(x), max(x) + 0.1, 0.1))
     plt.yticks(np.arange(-0.4, 0.6, 0.1))
     plt.grid('True')
-    plt.legend()
+    plt.legend(prop={"size": 14})
 
 if plot_deltaP_comp:
 
@@ -747,8 +748,9 @@ if plot_deltaP_comp:
     plt.grid('True')
     plt.legend()
 
-if (plot_CLcirc and enable_pitching) or (plot_CLcirc and enable_gust):
-    plot_circulatory_loads(alpha_arr, result[8]["cl_unsteady"], alpha_arr, result[8]["cl_steady"])
+if (plot_CLcirc and enable_pitching):
+    plot_circulatory_loads(alpha_arr, dalpha_arr, result[8]["cl_unsteady"], result[8]["cl_steady"], xwake, ywake, U_0,
+                           c)
 
 if plot_dt_comp:
 

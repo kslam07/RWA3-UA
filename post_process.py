@@ -42,25 +42,46 @@ def lumpvor2d(xcol, zcol, xvor, zvor, circvor=1):
     return vel_vor
 
 
-def plot_circulatory_loads(alpha_circ, cl_circ, alpha_ss, cl_ss):
+def plot_circulatory_loads(alpha_circ, dalpha_circ, cl_circ, cl_ss, x_wake, y_wake, u_inf, c, plot_wake=False):
     """
     Plots the circulatory and non-circulatory CL as function of the angle of attack, alpha
-
     :param alpha_circ: corresponding AoA for the circulatory CLs
+    :param dalpha_circ: diervative of alpha
     :param cl_circ: Array of circulatory CLs
     :param alpha_ss: corresponding AoA for the non-circulatory CLs
     :param cl_ss: Array of non-circulatory (steady-state) CLs
     """
 
-    fig, ax = plt.subplots(1, 1, dpi=150, constrained_layout=True)
+    fig, ax = plt.subplots(1, 2, dpi=150, constrained_layout=True, sharey=True)
 
-    ax.plot(np.degrees(alpha_circ), cl_circ, label=r"Unsteady $C_l$")
-    ax.plot(np.degrees(alpha_ss), cl_ss, label=r"Steady $C_l$")
+    # compute quasi-steady CL
+    cl_qs = 2 * np.pi * (alpha_circ + c / (2 * u_inf) * dalpha_circ)
+    # only plot 1 period of unsteady CL and steady CL
+    idx = np.where(alpha_circ[1:] * alpha_circ[:-1] < 0)[0][2] + 1
 
-    ax.grid()
-    ax.legend(prop={"size": 14})
-    ax.set_xlabel(r"$\alpha$ $[\circ]$", fontsize=14)
-    ax.set_ylabel(r"$C_l$ [-]", fontsize=14)
+    # unsteady CL
+    ax[0].plot(np.degrees(alpha_circ)[:idx], cl_circ[:idx], label=r"Unsteady $C_l$", linestyle='-.')
+    ax[1].plot(np.degrees(alpha_circ)[:idx], cl_circ[:idx], label=r"Unsteady $C_l$", linestyle='-.')
+    # steady CL
+    ax[0].plot(np.degrees(alpha_circ)[:idx], cl_ss[:idx], label=r"Steady $C_l$", c='r')
+    # quasi-steady CL
+    ax[1].plot(np.degrees(alpha_circ), cl_qs, label=r"Quasi-steady $C_l$", c='r', linestyle='--')
+
+    ax[0].grid()
+    ax[1].grid()
+    ax[0].legend(prop={"size": 14})
+    ax[1].legend(prop={"size": 14})
+    ax[0].set_ylabel(r"$C_l$ [-]", fontsize=14)
+    ax[0].set_xlabel(r"$\alpha$ $[\circ]$", fontsize=14)
+    ax[1].set_xlabel(r"$\alpha$ $[\circ]$", fontsize=14)
+
+    if plot_wake:
+        fig, ax = plt.subplots(1, 1, dpi=150, constrained_layout=True)
+        ax.scatter(x_wake, y_wake, label="Wake vortices")
+        ax.grid()
+        ax.set_xlabel("Horizontal distance [m]", fontsize=14)
+        ax.set_ylabel("Vertical distance [m]", fontsize=14)
+        ax.legend(prop={"size": 14}, loc=1)
 
 
 @nb.njit()
