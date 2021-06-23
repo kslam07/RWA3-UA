@@ -484,7 +484,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
         wake_gamma = np.append(wake_gamma, gamma_vec[-1])   # log circulation of wake
         gamma_arr[t + 1] = gamma_vec[:-1]                   # log circulation of each panel
 
-        print('   ...Calculating lift and pressure.\n')
+        print('   ...Calculating lift and pressure.')
         # Secondary computations
         delta_p, cl, cl_ss = compute_pressure_and_loads(U_0, V_0, dc, dt, gamma_arr[t+1], gamma_arr[t], alpha_arr[t],
                                                         gamma_ss_vec, rho)
@@ -508,7 +508,7 @@ def unsteady_VP(y, x, Npan, Npan_flap, alpha_arr, dalpha_arr, a_flap, c, c_flap,
     # sort in dictionary
     results_unsteady = {"delta_p": delta_p_arr, "cl_unsteady": cl_unsteady_arr, "cl_steady": cl_steady_arr}
 
-    return xc4, yc4, xp, yp, gamma_vec, wake_gamma, xwake, ywake, results_unsteady
+    return xc4, yc4, xp, yp, gamma_vec, wake_gamma, xwake, ywake, results_unsteady, xp_arr, yp_arr
 
 # ---------------------------------- #
 # Solver
@@ -577,6 +577,8 @@ if plot_velocity_field or plot_pressure_field:
         gammaW = result[5]
         xwake = result[6]
         ywake = result[7]
+        xp_arr = result[9]
+        yp_arr = result[10]
 
         v_map, cp_map = compute_velocity_field_us(U_0, X, Y, xp, yp, gammaB, gammaW, xwake, ywake)
 
@@ -663,7 +665,7 @@ if plot_velocity_field:
         values=(level_boundaries[:-1] + level_boundaries[1:]) / 2,
         )
     clb.ax.set_title(r'$V$ (m/s)', fontsize=14)
-    plt.plot(xp, yp, '-k', lw=2.)
+    plt.plot(xp_arr[:, 2], yp_arr[:, 2], '-k', lw=2.)
     plt.xlabel('x/c [-]', fontsize=16)
     plt.ylabel('y/c [-]', fontsize=16)
 
@@ -750,7 +752,7 @@ if plot_deltaP_comp:
 
 if (plot_CLcirc and enable_pitching):
     plot_circulatory_loads(alpha_arr, dalpha_arr, result[8]["cl_unsteady"], result[8]["cl_steady"], xwake, ywake, U_0,
-                           c)
+                           c, trange, plot_wake=True)
 
 if plot_dt_comp:
 
