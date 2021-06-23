@@ -42,7 +42,7 @@ def lumpvor2d(xcol, zcol, xvor, zvor, circvor=1):
     return vel_vor
 
 
-def plot_circulatory_loads(alpha_circ, dalpha_circ, cl_circ, cl_ss, x_wake, y_wake, u_inf, c, plot_wake=False):
+def plot_circulatory_loads(alpha_circ, dalpha_circ, cl_circ, cl_ss, x_wake, y_wake, u_inf, c, time_arr, plot_wake=False):
     """
     Plots the circulatory and non-circulatory CL as function of the angle of attack, alpha
     :param alpha_circ: corresponding AoA for the circulatory CLs
@@ -55,10 +55,12 @@ def plot_circulatory_loads(alpha_circ, dalpha_circ, cl_circ, cl_ss, x_wake, y_wa
     fig, ax = plt.subplots(1, 2, dpi=150, constrained_layout=True, sharey=True)
 
     # compute quasi-steady CL
-    cl_qs = 2 * np.pi * (alpha_circ + c / (2 * u_inf) * dalpha_circ)
+    alpha_qs = (alpha_circ + c / (2 * u_inf) * dalpha_circ)
+    cl_qs = 2 * np.pi * alpha_qs
+
     # only plot 1 period of unsteady CL and steady CL
     idx = np.where(alpha_circ[1:] * alpha_circ[:-1] < 0)[0][2] + 1
-
+    idx = None
     # unsteady CL
     ax[0].plot(np.degrees(alpha_circ)[:idx], cl_circ[:idx], label=r"Unsteady $C_l$", linestyle='-.')
     ax[1].plot(np.degrees(alpha_circ)[:idx], cl_circ[:idx], label=r"Unsteady $C_l$", linestyle='-.')
@@ -69,8 +71,8 @@ def plot_circulatory_loads(alpha_circ, dalpha_circ, cl_circ, cl_ss, x_wake, y_wa
 
     ax[0].grid()
     ax[1].grid()
-    ax[0].legend(prop={"size": 14})
-    ax[1].legend(prop={"size": 14})
+    ax[0].legend(prop={"size": 14}, loc="lower right")
+    ax[1].legend(prop={"size": 14}, loc="lower right")
     ax[0].set_ylabel(r"$C_l$ [-]", fontsize=14)
     ax[0].set_xlabel(r"$\alpha$ $[\circ]$", fontsize=14)
     ax[1].set_xlabel(r"$\alpha$ $[\circ]$", fontsize=14)
@@ -83,6 +85,37 @@ def plot_circulatory_loads(alpha_circ, dalpha_circ, cl_circ, cl_ss, x_wake, y_wa
         ax.set_ylabel("Vertical distance [m]", fontsize=14)
         ax.legend(prop={"size": 14}, loc=1)
 
+        # compute equivalent AoA
+        x_lag_old = 0
+        y_lag_old = 0
+        a1 = 0.165
+        a2 = 0.335
+        b1 = 0.045
+        b2 = 0.3
+        dt = 0.1
+        idx = np.where(alpha_circ[1:] * alpha_circ[:-1] < 0)[0][1] + 1
+        dalpha_qs = alpha_qs[1:] - alpha_qs[:-1]
+        alpha_e = []
+        for i, alpha_curr in enumerate(alpha_qs[1:]):
+            ds = 2 * dt * u_inf / c
+            x_lag = x_lag_old * np.exp(-b1 * ds) + dalpha_qs[i] * a1 * np.exp(-b1 * ds / 2)
+            y_lag = y_lag_old * np.exp(-b2 * ds) + dalpha_qs[i] * a2 * np.exp(-b2 * ds / 2)
+            alpha_e.append(alpha_curr - x_lag - y_lag)
+
+            x_lag_old = x_lag
+            y_lag_old = y_lag
+
+        # compute s
+        s = 2 * time_arr * u_inf / c
+
+        fig, ax = plt.subplots(1, 1, dpi=150, constrained_layout=True)
+        ax.plot(s[1:idx], np.degrees(alpha_e)[1:idx], label="Unsteady", linestyle='-.')
+        ax.plot(s[1:idx], np.degrees(alpha_qs)[1:idx], label="Quasi-steady", linestyle='--')
+        ax.plot(s[1:idx], np.degrees(alpha_circ)[1:idx], label="Steady", c='r')
+        ax.grid()
+        ax.legend(prop={"size": 14})
+        ax.set_xlabel("semi-chord s [-]", fontsize=14)
+        ax.set_ylabel(r"$\alpha$ [$\circ$]", fontsize=14)
 
 @nb.njit()
 def compute_velocity_field_us(u_inf, x_mesh, y_mesh, x_vorts, y_vorts, gamma_b, gamma_w, x_wake, y_wake):
